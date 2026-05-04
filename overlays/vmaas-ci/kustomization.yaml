@@ -51,9 +51,11 @@ secretGenerator:
     labels:
       osac.openshift.io/project: osac-aap
 
+configMapGenerator:
 - name: publish-templates-ig
   literals:
     - OSAC_TEMPLATE_COLLECTIONS=osac.templates,osac.massopencloud
+    - OSAC_FULFILLMENT_SERVICE_URI=https://fulfillment-internal-api:8001
 
 images:
   - name: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
@@ -147,76 +149,104 @@ patches:
         name: fulfillment-service
       spec:
         authentication:
+          fulfillment-api:
+            kubernetesTokenReview:
+              audiences:
+              - https://kubernetes.default.svc
+              - https://kubernetes.default.svc.cluster.local
+            metrics: false
+            overrides:
+              authnMethod:
+                value: serviceaccount
+            priority: 0
           keycloak-jwt:
             jwt:
               issuerUrl: https://keycloak.keycloak.svc.cluster.local/realms/osac
+            metrics: false
+            overrides:
+              authnMethod:
+                value: jwt
+            priority: 0
         authorization:
           default:
+            metrics: false
             opa:
+              allValues: true
               rego: |
-                import future.keywords.in
+                import rego.v1
 
-                # Define admin subjects for osac-e2e-ci namespace:
-                admin_subjects := {
+                # Emergency service accounts are Kubernetes service accounts that are allowed to act as administrators in case
+                # of emergency situations where it isn't possible to get a valid JWT token from the identity provider.
+                emergency_service_accounts := {
                   "system:serviceaccount:osac-e2e-ci:admin",
                   "system:serviceaccount:osac-e2e-ci:controller",
                   "system:serviceaccount:osac-e2e-ci:template-publisher",
                   "system:serviceaccount:osac-e2e-ci:osac-operator-controller-manager",
                 }
 
+                # Admin service accounts are service accounts that are allowed to act as administrators.
+                admin_service_accounts := {
+                  "service-account-osac-admin",
+                  "service-account-osac-controller",
+                  "service-account-fulfillment-controller",
+                }
+
+                # Admin groups are groups that are allowed to act as administrators.
+                admin_groups := {
+                  "admins",
+                }
+
                 # Get the gRPC method:
                 grpc_method := input.context.request.http.path
 
                 # Get the subject name:
-                subject_name = input.auth.identity.user.username {
+                subject_name = input.auth.identity.user.username if {
                   input.auth.identity.authnMethod == "serviceaccount"
                 }
-                subject_name = input.auth.identity.username {
+                subject_name = input.auth.identity.username if {
                   input.auth.identity.authnMethod == "jwt"
                 }
 
-                # Get the groups (for JWT users):
-                subject_groups = input.auth.identity.user.groups {
+                # Get the subject groups:
+                subject_groups = input.auth.identity.user.groups if {
                   input.auth.identity.authnMethod == "serviceaccount"
                 }
-                subject_groups = input.auth.identity.groups {
+                subject_groups = input.auth.identity.groups if {
                   input.auth.identity.authnMethod == "jwt"
                 }
 
-                # Function to check if an account is an admin account:
-                is_admin {
-                  subject_name in admin_subjects
+                # Check if an account is an admin account:
+                default is_admin = false
+                is_admin if {
+                  subject_name in emergency_service_accounts
+                }
+                is_admin if {
+                  subject_name in admin_service_accounts
+                }
+                is_admin if {
+                  some group in subject_groups
+                  group in admin_groups
                 }
 
-                # Function to check if a JWT user is an admin (in admins group or has tenant-admin role):
-                is_jwt_admin {
-                  input.auth.identity.authnMethod == "jwt"
-                  "admins" in subject_groups
-                }
-                is_jwt_admin {
-                  input.auth.identity.authnMethod == "jwt"
-                  "tenant-admin" in input.auth.identity.realm_access.roles
-                }
-
-                # Function to check if an account is a client account:
-                is_client {
+                # Check if an account is a client account:
+                default is_client = false
+                is_client if {
                   not is_admin
-                  not is_jwt_admin
                 }
 
                 # Allow metadata, reflection and health to everyone:
-                allow {
+                allow if {
                   startswith(grpc_method, "/metadata.")
                 }
-                allow {
+                allow if {
                   startswith(grpc_method, "/grpc.reflection.")
                 }
-                allow {
+                allow if {
                   startswith(grpc_method, "/grpc.health.")
                 }
 
                 # Allow specific methods to clients:
-                allow {
+                allow if {
                   is_client
                   grpc_method in {
                     "/osac.public.v1.ClusterTemplates/Get",
@@ -243,10 +273,30 @@ patches:
                   }
                 }
 
-                # Allow everything to admins (service accounts or JWT users in admins group):
-                allow {
+                # Allow everything to admins:
+                allow if {
                   is_admin
                 }
-                allow {
-                  is_jwt_admin
-                }
+            priority: 0
+        hosts:
+        - '*'
+        response:
+          success:
+            headers:
+              x-subject:
+                json:
+                  properties:
+                    tenants:
+                      expression: |
+                        auth.authorization.default.is_admin
+                          ? ["*"]
+                          : auth.identity.authnMethod == "jwt"
+                            ? auth.identity.groups
+                            : [auth.identity.user.username.split(":")[2]]
+                    user:
+                      expression: |
+                        auth.identity.authnMethod == "jwt"
+                          ? auth.identity.username
+                          : auth.identity.user.username.split(":")[3]
+                metrics: false
+                priority: 0

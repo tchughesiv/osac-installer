@@ -46,6 +46,7 @@ configMapGenerator:
       disableNameSuffixHash: true
     literals:
       - OSAC_TEMPLATE_COLLECTIONS=osac.templates,isaiahstapleton.ai_cluster_ansible
+      - OSAC_FULFILLMENT_SERVICE_URI=https://fulfillment-internal-api:8001
 
 images:
   - name: ghcr.io/osac-project/osac-operator

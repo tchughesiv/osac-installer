@@ -30,6 +30,12 @@ For manual deployments, run the script standalone after `oc apply -k`:
 INSTALLER_NAMESPACE=<project-name> ./scripts/aap-configuration.sh
 ```
 
+To impersonate a cluster admin for **`oc`** (including **`oc get`** / **`oc patch`** used by this script), set **`OC_EXTRA`** (see **`scripts/lib.sh`**):
+
+```bash
+OC_EXTRA='--as=system:admin' INSTALLER_NAMESPACE=<project-name> ./scripts/aap-configuration.sh
+```
+
 Shell environment variables override values from the env files, which is useful
 for CI pipelines.
 

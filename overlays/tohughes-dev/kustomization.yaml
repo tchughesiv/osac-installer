@@ -1,0 +1,340 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: tohughes-dev
+
+# This applies a name prefix to cluster-scoped resources (ClusterRoles,
+# ClusterRoleBindings) but does not modify namespaced resources.
+transformers:
+- prefixTransformer.yaml
+
+labels:
+- includeSelectors: true
+  pairs:
+    app.kubernetes.io/managed-by: kustomize
+    environment: development
+
+resources:
+- ../../base
+- ./ca-trust-bundle.yaml
+- ./capi-provider-role.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+secretGenerator:
+# This expects to find quay credentials in
+# files/quay-pull-secret.json.
+- name: quay-pull-secret
+  files:
+  - .dockerconfigjson=files/quay-pull-secret.json
+  type: kubernetes.io/dockerconfigjson
+
+# This expects to find an AAP license manifest
+# in files/license.zip.
+- name: config-as-code-manifest-ig
+  files:
+    - license.zip=files/license.zip
+  options:
+    labels:
+      osac.openshift.io/project: osac-aap
+
+- name: config-as-code-ig
+  options:
+    disableNameSuffixHash: true
+  literals:
+    - AAP_EE_IMAGE=ghcr.io/osac-project/osac-aap:latest
+    - AAP_PROJECT_GIT_URI="https://github.com/tchughesiv/osac-aap"
+    - AAP_PROJECT_GIT_BRANCH=OSAC-769
+
+- name: cluster-fulfillment-ig
+  options:
+    labels:
+      osac.openshift.io/project: osac-aap
+
+- name: network-fulfillment-ig
+  options:
+    labels:
+      osac.openshift.io/project: osac-aap
+
+# Base defaults for the cluster-fulfillment-ig ConfigMap.
+# scripts/aap-configuration.sh may override these with values
+# from files/osac-aap-configuration.env after oc apply -k.
+configMapGenerator:
+- name: publish-templates-ig
+  literals:
+    - OSAC_TEMPLATE_COLLECTIONS=osac.templates,osac.massopencloud
+    - OSAC_FULFILLMENT_SERVICE_URI=https://fulfillment-internal-api:8001
+- name: cluster-fulfillment-ig
+  options:
+    labels:
+      osac.openshift.io/project: osac-aap
+  literals:
+    - NETWORK_CLASS=esi
+    - NETWORK_STEPS_COLLECTION=massopencloud.steps
+    - EXTERNAL_ACCESS_BASE_DOMAIN=box.massopen.cloud
+    - EXTERNAL_ACCESS_SUPPORTED_BASE_DOMAINS=box.massopen.cloud
+    - EXTERNAL_ACCESS_API_INTERNAL_NETWORK=hypershift
+    - HOSTED_CLUSTER_BASE_DOMAIN=box.massopen.cloud
+    - HOSTED_CLUSTER_CONTROLLER_AVAILABILITY_POLICY=HighlyAvailable
+    - HOSTED_CLUSTER_INFRASTRUCTURE_AVAILABILITY_POLICY=HighlyAvailable
+- name: network-fulfillment-ig
+  options:
+    labels:
+      osac.openshift.io/project: osac-aap
+  literals:
+    - NETRIS_CONTROLLER_URL=https://redhat-ctl.netris.io
+    - NETRIS_USERNAME=netris
+    - NETRIS_SITE_ID=5
+    - NETRIS_TENANT_ID=1
+    - NETRIS_TENANT_NAME=Admin
+
+images:
+  # Must match the image name after ../../base (not the submodule alias "fulfillment-service").
+  - name: ghcr.io/osac-project/fulfillment-service
+    newName: quay.io/tchughesiv/fulfillment-service
+    newTag: "OSAC-768-4"
+  - name: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+    newName: quay.io/openshift/origin-cli
+    newTag: "4.20.0"
+
+patches:
+  - patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: fulfillment-controller
+      spec:
+        template:
+          spec:
+            containers:
+              - name: controller
+                imagePullPolicy: Always
+  - target:
+      kind: Deployment
+      name: fulfillment-controller
+    patch: |-
+      - op: replace
+        path: /spec/template/spec/containers/0/command/7
+        value: "--auth-issuer-url=https://keycloak.keycloak.svc.cluster.local/realms/osac"
+      - op: replace
+        path: /spec/template/spec/containers/0/command/11
+        value: "--idp-url=https://keycloak.keycloak.svc.cluster.local"
+  - target:
+      kind: Deployment
+      name: osac-operator-controller-manager
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: OSAC_ENABLE_COMPUTE_INSTANCE_CONTROLLER
+          value: "true"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: OSAC_ENABLE_TENANT_CONTROLLER
+          value: "true"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: OSAC_ENABLE_NETWORKING_CONTROLLER
+          value: "true"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: OSAC_AAP_TEMPLATE_PREFIX
+          value: osac
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: OSAC_AAP_URL
+          value: "https://osac-aap-tohughes-dev.apps.hypershift1.nerc.mghpcc.org/api/controller"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: OSAC_AAP_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: osac-aap-api-token
+              key: token
+              optional: true
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: OSAC_AAP_INSECURE_SKIP_VERIFY
+          value: "true"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: OSAC_AAP_STATUS_POLL_INTERVAL
+          value: "30s"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: OSAC_MINIMUM_REQUEST_INTERVAL
+          value: "2m"
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: OSAC_FULFILLMENT_SERVER_ADDRESS
+          value: fulfillment-internal-api:8001
+      - op: add
+        path: /spec/template/spec/containers/0/env/-
+        value:
+          name: OSAC_FULFILLMENT_TOKEN_FILE
+          value: /var/run/secrets/kubernetes.io/serviceaccount/token
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: Always
+  - patch: |
+      apiVersion: operator.authorino.kuadrant.io/v1beta1
+      kind: Authorino
+      metadata:
+        name: authorino
+      spec:
+        volumes:
+          items:
+          - name: ca-bundle
+            configMaps:
+            - ca-bundle
+            items:
+            - key: bundle.pem
+              path: ca-bundle.crt
+            mountPath: /etc/pki/tls/certs
+  # Override issuerUrl (base has :8001, we use port 443 via service mapping)
+  # and admin_subjects for tohughes-dev namespace
+  - patch: |
+      apiVersion: authorino.kuadrant.io/v1beta3
+      kind: AuthConfig
+      metadata:
+        name: fulfillment-service
+      spec:
+        authentication:
+          keycloak-jwt:
+            jwt:
+              issuerUrl: https://keycloak.keycloak.svc.cluster.local/realms/osac
+        authorization:
+          default:
+            opa:
+              rego: |
+                import future.keywords.in
+
+                # Define admin subjects for tohughes-dev namespace:
+                admin_subjects := {
+                  "system:serviceaccount:tohughes-dev:admin",
+                  "system:serviceaccount:tohughes-dev:controller",
+                  "system:serviceaccount:tohughes-dev:template-publisher",
+                  "system:serviceaccount:tohughes-dev:osac-operator-controller-manager",
+                  "service-account-fulfillment-controller",
+                }
+
+                # Get the gRPC method:
+                grpc_method := input.context.request.http.path
+
+                # Get the subject name:
+                subject_name = input.auth.identity.user.username {
+                  input.auth.identity.authnMethod == "serviceaccount"
+                }
+                subject_name = input.auth.identity.username {
+                  input.auth.identity.authnMethod == "jwt"
+                }
+
+                # Get the groups (for JWT users):
+                subject_groups = input.auth.identity.user.groups {
+                  input.auth.identity.authnMethod == "serviceaccount"
+                }
+                subject_groups = input.auth.identity.groups {
+                  input.auth.identity.authnMethod == "jwt"
+                }
+
+                # Function to check if an account is an admin account:
+                is_admin {
+                  subject_name in admin_subjects
+                }
+
+                # Function to check if a JWT user is an admin (in admins group or has tenant-admin role):
+                is_jwt_admin {
+                  input.auth.identity.authnMethod == "jwt"
+                  "admins" in subject_groups
+                }
+                is_jwt_admin {
+                  input.auth.identity.authnMethod == "jwt"
+                  "tenant-admin" in input.auth.identity.realm_access.roles
+                }
+
+                # Function to check if an account is a client account:
+                is_client {
+                  not is_admin
+                  not is_jwt_admin
+                }
+
+                # Allow metadata, reflection and health to everyone:
+                allow {
+                  startswith(grpc_method, "/metadata.")
+                }
+                allow {
+                  startswith(grpc_method, "/grpc.reflection.")
+                }
+                allow {
+                  startswith(grpc_method, "/grpc.health.")
+                }
+
+                # Allow specific methods to clients:
+                allow {
+                  is_client
+                  grpc_method in {
+                    "/osac.public.v1.ClusterTemplates/Get",
+                    "/osac.public.v1.ClusterTemplates/List",
+                    "/osac.public.v1.Clusters/Create",
+                    "/osac.public.v1.Clusters/Delete",
+                    "/osac.public.v1.Clusters/Get",
+                    "/osac.public.v1.Clusters/GetKubeconfig",
+                    "/osac.public.v1.Clusters/GetKubeconfigViaHttp",
+                    "/osac.public.v1.Clusters/GetPassword",
+                    "/osac.public.v1.Clusters/GetPasswordViaHttp",
+                    "/osac.public.v1.Clusters/List",
+                    "/osac.public.v1.Clusters/Update",
+                    "/osac.public.v1.ComputeInstanceTemplates/Get",
+                    "/osac.public.v1.ComputeInstanceTemplates/List",
+                    "/osac.public.v1.ComputeInstances/Create",
+                    "/osac.public.v1.ComputeInstances/Delete",
+                    "/osac.public.v1.ComputeInstances/Get",
+                    "/osac.public.v1.ComputeInstances/List",
+                    "/osac.public.v1.ComputeInstances/Update",
+                    "/osac.public.v1.Events/Watch",
+                    "/osac.public.v1.HostTypes/Get",
+                    "/osac.public.v1.HostTypes/List",
+                    "/osac.public.v1.NetworkClasses/Create",
+                    "/osac.public.v1.NetworkClasses/Delete",
+                    "/osac.public.v1.NetworkClasses/Get",
+                    "/osac.public.v1.NetworkClasses/List",
+                    "/osac.public.v1.NetworkClasses/Update",
+                    "/osac.public.v1.Subnets/Create",
+                    "/osac.public.v1.Subnets/Delete",
+                    "/osac.public.v1.Subnets/Get",
+                    "/osac.public.v1.Subnets/List",
+                    "/osac.public.v1.Subnets/Update",
+                    "/osac.public.v1.VirtualNetworks/Create",
+                    "/osac.public.v1.VirtualNetworks/Delete",
+                    "/osac.public.v1.VirtualNetworks/Get",
+                    "/osac.public.v1.VirtualNetworks/List",
+                    "/osac.public.v1.VirtualNetworks/Update",
+                    "/osac.public.v1.SecurityGroups/Create",
+                    "/osac.public.v1.SecurityGroups/Delete",
+                    "/osac.public.v1.SecurityGroups/Get",
+                    "/osac.public.v1.SecurityGroups/List",
+                    "/osac.public.v1.SecurityGroups/Update",
+                    "/osac.public.v1.PublicIPs/Create",
+                    "/osac.public.v1.PublicIPs/Delete",
+                    "/osac.public.v1.PublicIPs/Get",
+                    "/osac.public.v1.PublicIPs/List",
+                  }
+                }
+
+                # Allow everything to admins (service accounts or JWT users in admins group):
+                allow {
+                  is_admin
+                }
+                allow {
+                  is_jwt_admin
+                }

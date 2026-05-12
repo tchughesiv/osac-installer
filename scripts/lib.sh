@@ -1,5 +1,31 @@
 #!/usr/bin/env bash
 
+# Absolute path to this file (used by oc_timeout subshells).
+_OSAC_LIB_SH=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")
+
+# Optional extra arguments prepended to every `oc` invocation (space-separated).
+# Applies to reads, writes, and oc_timeout (use instead of `timeout N oc ...`, which
+# would bypass this shell's oc function).
+# Example: OC_EXTRA='--as=system:admin' ./scripts/setup.sh
+oc() {
+    # shellcheck disable=SC2086
+    command oc ${OC_EXTRA:-} "$@"
+}
+
+# Like GNU timeout, but honors OC_EXTRA (sources this lib in a subshell so `oc`
+# is the wrapper above). Replace `timeout N oc ...` with `oc_timeout N ...`.
+oc_timeout() {
+    local to="$1"
+    shift
+    command timeout "${to}" bash --noprofile --norc -c '
+        export OC_EXTRA="${OC_EXTRA:-}"
+        source "${1:?}"
+        shift
+        # shellcheck disable=SC2086
+        command oc ${OC_EXTRA} "$@"
+    ' _ "${_OSAC_LIB_SH}" "$@"
+}
+
 # Retry a condition until it succeeds or times out, optionally running a command each iteration
 # Usage: retry_until <timeout_seconds> <interval_seconds> <condition_command> [loop_command]
 # Returns: 0 on success, 1 on timeout

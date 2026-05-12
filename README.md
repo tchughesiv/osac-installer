@@ -275,6 +275,12 @@ $ INGRESS_SERVICE=true STORAGE_SERVICE=true \
     INSTALLER_NAMESPACE=<project-name> INSTALLER_KUSTOMIZE_OVERLAY=<project-name> ./scripts/setup.sh
 ```
 
+All **`oc`** invocations in **`setup.sh`** (and other scripts that `source scripts/lib.sh`) honor **`OC_EXTRA`**, including **`oc get`**, **`oc wait`**, and **`oc_timeout`** in **`teardown.sh`**. Example:
+
+```bash
+OC_EXTRA='--as=system:admin' INSTALLER_NAMESPACE=<project-name> INSTALLER_KUSTOMIZE_OVERLAY=<project-name> ./scripts/setup.sh
+```
+
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `KUBECONFIG` | `~/.kube/config` | Path to the target cluster's kubeconfig file |
@@ -285,6 +291,7 @@ $ INGRESS_SERVICE=true STORAGE_SERVICE=true \
 | `STORAGE_SERVICE` | `false` | Install LVMS and create a default StorageClass (`lvms-vg1`) |
 | `VIRT_SERVICE` | `false` | Install OpenShift Virtualization |
 | `MCE_SERVICE` | `false` | Install Multicluster Engine and infrastructure operator |
+| `OC_EXTRA` | *(empty)* | Extra `oc` arguments for **every** `oc` call in scripts that source `scripts/lib.sh` (including reads and `oc_timeout` in `teardown.sh`); see `scripts/lib.sh` |
 
 #### AAP Configuration
 
@@ -512,6 +519,14 @@ For manual deployments, run it after the AAP bootstrap job completes:
 ```bash
 $ INSTALLER_NAMESPACE=<project-name> ./scripts/prepare-aap.sh
 ```
+
+If your `oc` user cannot create secrets but you may impersonate an admin, set **`OC_EXTRA`** (applies to all `oc` calls in scripts that source `scripts/lib.sh`):
+
+```bash
+$ OC_EXTRA='--as=system:admin' INSTALLER_NAMESPACE=<project-name> ./scripts/prepare-aap.sh
+```
+
+The same **`OC_EXTRA`** behavior applies to **`./scripts/aap-configuration.sh`** (see **`scripts/lib.sh`**).
 
 This script will:
 - Retrieve the AAP admin password from the `osac-aap-admin-password` secret

@@ -30,7 +30,7 @@ if [[ -z "${AAP_TOKEN}" || "${AAP_TOKEN}" == "null" ]]; then
     exit 1
 fi
 
-# Store the token in a Kubernetes secret
+# Store the token in a Kubernetes secret (--dry-run=client is local; apply hits the API)
 oc create secret generic osac-aap-api-token \
     --from-literal=token="${AAP_TOKEN}" \
     -n ${INSTALLER_NAMESPACE} \

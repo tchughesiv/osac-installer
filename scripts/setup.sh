@@ -21,6 +21,7 @@ MCE_SERVICE=${MCE_SERVICE:-${EXTRA_SERVICES}}
 echo "=== Setting up OSAC deployment ==="
 echo "Overlay: ${INSTALLER_KUSTOMIZE_OVERLAY}"
 echo "Namespace: ${INSTALLER_NAMESPACE}"
+[[ -n "${OC_EXTRA:-}" ]] && echo "OC_EXTRA (all oc calls): ${OC_EXTRA}"
 echo ""
 
 # Optionally install LVMS as storage service (must be before keycloak which needs a default storage class)
@@ -188,13 +189,44 @@ if oc get deployment authorino-operator -n openshift-operators &>/dev/null; then
     echo "Authorino operator is already installed, skipping..."
 else
     oc apply -f prerequisites/authorino-operator.yaml
-    retry_until 300 3 '[[ -n "$(oc get csv --no-headers -n openshift-operators | grep authorino)" ]]' 'oc apply -f prerequisites/authorino-operator.yaml || true' || {
+    retry_until 300 3 '[[ -n "$(oc get csv --no-headers -n openshift-operators | grep -iEe authorino -e kuadrant)" ]]' 'oc apply -f prerequisites/authorino-operator.yaml || true' || {
         echo "Timed out waiting for authorino CSV to exist"
         exit 1
     }
 fi
-AUTHORINO_CSV=$(oc get csv --no-headers -n openshift-operators | awk '/authorino/ { print $1 }' | tail -1)
-wait_for_resource clusterserviceversion/${AUTHORINO_CSV} jsonpath='{.status.phase}'=Succeeded 300 openshift-operators
+# Prefer Subscription status (reliable OLM name); fall back to any subscription/CSV
+# matching Authorino when names differ or currentCSV is not yet populated.
+AUTHORINO_CSV=""
+if oc get subscription authorino-operator -n openshift-operators &>/dev/null; then
+    AUTHORINO_CSV=$(oc get subscription authorino-operator -n openshift-operators -o jsonpath='{.status.currentCSV}' 2>/dev/null || true)
+fi
+if [[ -z "${AUTHORINO_CSV}" ]]; then
+    while read -r sub; do
+        [[ -z "${sub}" ]] && continue
+        spec_name=$(oc get subscription "${sub}" -n openshift-operators -o jsonpath='{.spec.name}' 2>/dev/null || true)
+        if [[ "${sub}" =~ [Aa]uthorino ]] || [[ "${spec_name}" =~ [Aa]uthorino ]]; then
+            AUTHORINO_CSV=$(oc get subscription "${sub}" -n openshift-operators -o jsonpath='{.status.currentCSV}' 2>/dev/null || true)
+            [[ -n "${AUTHORINO_CSV}" ]] && break
+        fi
+    done < <(oc get subscription -n openshift-operators --no-headers -o custom-columns=NAME:.metadata.name 2>/dev/null || true)
+fi
+if [[ -z "${AUTHORINO_CSV}" ]]; then
+    # Do not let a failed oc get (e.g. RBAC) abort the script under pipefail before the empty check below.
+    AUTHORINO_CSV=$(oc get csv --no-headers -n openshift-operators 2>/dev/null | grep -iE 'authorino|kuadrant' | awk '{ print $1 }' | head -1) || true
+fi
+if [[ -z "${AUTHORINO_CSV}" ]]; then
+    if oc get deployment authorino-operator -n openshift-operators &>/dev/null; then
+        echo "WARNING: Could not resolve an Authorino ClusterServiceVersion in openshift-operators, but deployment/authorino-operator exists."
+        echo "Skipping CSV Succeeded wait; try: oc get csv,subscription -n openshift-operators | grep -iE 'authorino|kuadrant'"
+    else
+        echo "ERROR: Could not resolve an Authorino clusterserviceversion in openshift-operators."
+        echo "Expected a subscription or CSV matching Authorino. Try:"
+        echo "  oc get subscription,csv -n openshift-operators | grep -iE 'authorino|kuadrant'"
+        exit 1
+    fi
+else
+    wait_for_resource "clusterserviceversion/${AUTHORINO_CSV}" jsonpath='{.status.phase}'=Succeeded 300 openshift-operators
+fi
 wait_for_resource deployment/authorino-operator condition=Available 300 openshift-operators
 
 # Apply keycloak prerequisites and wait for it to be ready
@@ -235,7 +267,12 @@ else
         exit 1
     }
 fi
-AAP_CSV=$(oc get csv --no-headers -n ${AAP_NS} | awk '/aap/ { print $1 }' | tail -1)
+AAP_CSV=$(oc get csv --no-headers -n ${AAP_NS} 2>/dev/null | awk '/aap/ { print $1 }' | tail -1) || true
+if [[ -z "${AAP_CSV}" ]]; then
+    echo "ERROR: Could not resolve an AAP clusterserviceversion in ${AAP_NS}."
+    echo "Try: oc get csv -n ${AAP_NS} | grep -i aap"
+    exit 1
+fi
 wait_for_resource clusterserviceversion/${AAP_CSV} jsonpath='{.status.phase}'=Succeeded 300 ${AAP_NS}
 wait_for_resource deployment/automation-controller-operator-controller-manager condition=Available 300 ${AAP_NS}
 

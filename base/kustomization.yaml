@@ -30,9 +30,9 @@ images:
   newTag: sha-4fe43c1
 - name: osac-aap
   newName: ghcr.io/osac-project/osac-aap
-  newTag: sha-744bc2c
+  newTag: sha-1e2c4d2
 - name: ghcr.io/osac-project/osac-operator
-  newTag: sha-7ba53e5
+  newTag: sha-8e5b916
 - name: envoy
   newName: docker.io/envoyproxy/envoy
   newTag: v1.33.0

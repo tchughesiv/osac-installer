@@ -248,11 +248,16 @@ wait_for_namespace_cleanup "${INSTALLER_NAMESPACE}"
 # Apply kustomize overlay
 oc apply -k overlays/${INSTALLER_KUSTOMIZE_OVERLAY}
 
-# Clean up legacy shared ca-bundle Bundle if a per-overlay one now exists
-if oc get bundle "ca-bundle-${INSTALLER_NAMESPACE}" &>/dev/null && \
-   oc get bundle ca-bundle &>/dev/null; then
-    echo "Deleting legacy shared ca-bundle Bundle (replaced by ca-bundle-${INSTALLER_NAMESPACE})..."
-    oc delete bundle ca-bundle
+# Ensure the shared ca-bundle Bundle includes our namespace in its selector.
+# The Bundle is cluster-scoped and shared across overlays; patching the selector
+# is additive and won't affect other developers' namespaces.
+if oc get bundle ca-bundle &>/dev/null; then
+    EXISTING=$(oc get bundle ca-bundle -o jsonpath='{.spec.target.namespaceSelector.matchExpressions[0].values}')
+    if ! echo "${EXISTING}" | grep -q "\"${INSTALLER_NAMESPACE}\""; then
+        echo "Adding ${INSTALLER_NAMESPACE} to ca-bundle namespace selector..."
+        oc patch bundle ca-bundle --type=json -p \
+            "[{\"op\":\"add\",\"path\":\"/spec/target/namespaceSelector/matchExpressions/0/values/-\",\"value\":\"${INSTALLER_NAMESPACE}\"}]"
+    fi
 fi
 
 # Create controller OAuth credentials from the Keycloak realm config

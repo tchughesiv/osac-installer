@@ -97,6 +97,7 @@ rules:
       - console.osac.openshift.io
     resources:
       - computeinstances/console
+      - computeinstances/vnc
     verbs:
       - get
   - apiGroups:

@@ -161,13 +161,41 @@ oc apply -k "overlays/${INSTALLER_KUSTOMIZE_OVERLAY}"
 # After recert, cert-manager reissues TLS certificates with the new cluster CA.
 # Pods that start before certs are ready crash loading the CA file. Wait for all
 # certificates to be reissued, then restart pods so they mount fresh secrets.
-# CDI webhook certs are managed by the CDI operator (not cert-manager). The CDI
-# operator renews the signer but doesn't re-issue server certs from it. Delete
-# the stale server certs so the operator recreates them with the new signer.
+refresh_cdi_certificates() {
+    # CDI manages its own CA hierarchy (not cert-manager). After recert, the
+    # signers and all leaf certs are stale. Delete the full chain so the operator
+    # rebuilds everything from scratch. Deleting only the server cert secrets is
+    # insufficient — the signer CAs are also past their refresh window, leaving
+    # the operator unable to issue valid replacements and causing DataVolumeError
+    # on every VM that needs a boot disk.
+    # Skips silently when CDI is not installed (e.g., CaaS snapshots).
+    if ! oc get namespace openshift-cnv &>/dev/null; then
+        return 0
+    fi
+    echo "  Refreshing CDI certificates..."
+    for secret in cdi-apiserver-signer cdi-uploadproxy-signer \
+                  cdi-uploadserver-client-signer cdi-uploadserver-signer \
+                  cdi-apiserver-server-cert cdi-uploadproxy-server-cert \
+                  cdi-uploadserver-client-cert; do
+        oc delete secret "${secret}" -n openshift-cnv --ignore-not-found
+    done
+    # Kill the operator pod to reset crash-loop backoff. On startup it finds
+    # no certs and generates a fresh CA chain.
+    oc delete pod -n openshift-cnv -l app=cdi-operator --ignore-not-found
+    oc rollout status deploy/cdi-operator -n openshift-cnv --timeout=300s
+    # Restart components so they load the new certs immediately instead of
+    # waiting for crash-loop backoff to cycle.
+    for deploy in cdi-deployment cdi-apiserver cdi-uploadproxy; do
+        oc rollout restart "deploy/${deploy}" -n openshift-cnv 2>/dev/null || true
+    done
+    oc rollout status deploy/cdi-deployment -n openshift-cnv --timeout=300s
+    oc rollout status deploy/cdi-apiserver -n openshift-cnv --timeout=300s
+    echo "  CDI certificates refreshed"
+}
+
 echo "[4/8] Waiting for TLS certificates and restarting pods..."
-for secret in cdi-apiserver-server-cert cdi-uploadproxy-server-cert; do
-    oc delete secret "${secret}" -n openshift-cnv --ignore-not-found
-done
+refresh_cdi_certificates &
+pid_cdi=$!
 pids=()
 for cert in authorino fulfillment-controller fulfillment-grpc-server fulfillment-api \
             fulfillment-rest-gateway fulfillment-database-client fulfillment-database-server \
@@ -177,6 +205,7 @@ for cert in authorino fulfillment-controller fulfillment-grpc-server fulfillment
 done
 failed=0
 for pid in "${pids[@]}"; do wait "${pid}" || failed=1; done
+wait ${pid_cdi} || failed=1
 if (( failed )); then echo "ERROR: TLS certificates not ready"; exit 1; fi
 echo "[4/8] TLS certificates ready, restarting fulfillment pods..."
 for deploy in fulfillment-controller fulfillment-grpc-server fulfillment-rest-gateway fulfillment-ingress-proxy; do

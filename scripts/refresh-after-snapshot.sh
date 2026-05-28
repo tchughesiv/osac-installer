@@ -26,7 +26,7 @@ echo "Waiting for cluster services to stabilize..."
 
 patch_stale_routes() {
     echo "  Patching stale routes with new domain..."
-    for ns in "${INSTALLER_NAMESPACE}" "${KEYCLOAK_NS}"; do
+    for ns in "${INSTALLER_NAMESPACE}" "${KEYCLOAK_NS}" "multicluster-engine"; do
         for route in $(oc get routes -n "${ns}" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
             OLD_HOST=$(oc get route "${route}" -n "${ns}" -o jsonpath='{.spec.host}')
             ROUTE_DOMAIN=$(echo "${OLD_HOST}" | sed "s/^[^.]*\.//")
@@ -46,11 +46,20 @@ oc wait --for=condition=Ready certificate/keycloak-tls -n "${KEYCLOAK_NS}" --tim
 pid_kc=$!
 patch_stale_routes &
 pid_rt=$!
+# Recert triggers an AAP controller rollout on boot. Wait for it to finish
+# before mutating any resources, otherwise the operator cascade causes
+# multiple waves of rollouts that kill in-flight AAP jobs.
+oc rollout status deploy/osac-aap-controller-task -n "${INSTALLER_NAMESPACE}" --timeout=300s 2>/dev/null &
+pid_aap1=$!
+oc rollout status deploy/osac-aap-controller-web -n "${INSTALLER_NAMESPACE}" --timeout=300s 2>/dev/null &
+pid_aap2=$!
 
 failed=0
 wait ${pid_tm} || failed=1
 wait ${pid_kc} || failed=1
 wait ${pid_rt} || failed=1
+wait ${pid_aap1} || true
+wait ${pid_aap2} || true
 if (( failed )); then
     echo "ERROR: Cluster services did not stabilize within timeout"
     exit 1
@@ -58,12 +67,20 @@ fi
 echo "Cluster services ready"
 echo ""
 
+# Recert rotates the cluster CA but the assisted-service JWT signing keypair
+# (stored in the assisted-servicelocal-auth secret) is not rotated. Delete
+# the secret now; assisted-service will be restarted after TLS certs are ready.
+if oc get secret assisted-servicelocal-auth -n multicluster-engine &>/dev/null; then
+    echo "Deleting stale assisted-service auth keypair..."
+    oc delete secret assisted-servicelocal-auth -n multicluster-engine
+fi
+
 # Keycloak sync and fulfillment credentials run in parallel.
 # Credentials read from realm.json (local file) — no dependency on Keycloak being up.
 # Kustomize apply needs the credentials secret, so we wait for it before proceeding.
 
 keycloak_sync() {
-    echo "[1/8] Syncing Keycloak realm..."
+    echo "[1/9] Syncing Keycloak realm..."
     NEW_HASH=$(md5sum "${REALM_JSON}" | awk '{print $1}')
     OLD_HASH=$(oc get configmap keycloak-realm -n "${KEYCLOAK_NS}" -o jsonpath='{.data.realm\.json}' 2>/dev/null | md5sum | awk '{print $1}')
     if [[ "${NEW_HASH}" != "${OLD_HASH}" ]]; then
@@ -122,11 +139,11 @@ keycloak_sync() {
         oc apply -f prerequisites/keycloak/service/password-setup-job.yaml -n "${KEYCLOAK_NS}"
         oc wait --for=condition=Complete job/keycloak-set-passwords -n "${KEYCLOAK_NS}" --timeout=300s
     fi
-    echo "[1/8] Keycloak sync complete"
+    echo "[1/9] Keycloak sync complete"
 }
 
 create_fulfillment_credentials() {
-    echo "[2/8] Recreating fulfillment controller credentials..."
+    echo "[2/9] Recreating fulfillment controller credentials..."
     FC_CLIENT_ID=$(jq -er '.clients[] | select(.serviceAccountsEnabled == true) | .clientId' "${REALM_JSON}")
     FC_CLIENT_SECRET=$(jq -er ".clients[] | select(.clientId == \"${FC_CLIENT_ID}\") | .secret // empty" "${REALM_JSON}")
     [[ -n "${FC_CLIENT_SECRET}" ]] || { echo "ERROR: Could not resolve secret for ${FC_CLIENT_ID} in realm.json" >&2; exit 1; }
@@ -135,7 +152,7 @@ create_fulfillment_credentials() {
         --from-literal=client-id="${FC_CLIENT_ID}" \
         --from-literal=client-secret="${FC_CLIENT_SECRET}" \
         -n "${INSTALLER_NAMESPACE}"
-    echo "[2/8] Credentials created for client: ${FC_CLIENT_ID}"
+    echo "[2/9] Credentials created for client: ${FC_CLIENT_ID}"
 }
 
 keycloak_sync &
@@ -147,7 +164,7 @@ failed=0
 wait ${pid_creds} || failed=1
 if (( failed )); then echo "ERROR: Failed to create fulfillment credentials"; exit 1; fi
 
-echo "[3/8] Applying kustomize overlay..."
+echo "[3/9] Applying kustomize overlay..."
 oc delete job -n "${INSTALLER_NAMESPACE}" --all --ignore-not-found
 # Exclude the AnsibleAutomationPlatform CR and bootstrap job from the apply.
 # Both already exist on the cluster from the snapshot. Re-applying the CR
@@ -179,12 +196,8 @@ refresh_cdi_certificates() {
                   cdi-uploadserver-client-cert; do
         oc delete secret "${secret}" -n openshift-cnv --ignore-not-found
     done
-    # Kill the operator pod to reset crash-loop backoff. On startup it finds
-    # no certs and generates a fresh CA chain.
     oc delete pod -n openshift-cnv -l app=cdi-operator --ignore-not-found
     oc rollout status deploy/cdi-operator -n openshift-cnv --timeout=300s
-    # Restart components so they load the new certs immediately instead of
-    # waiting for crash-loop backoff to cycle.
     for deploy in cdi-deployment cdi-apiserver cdi-uploadproxy; do
         oc rollout restart "deploy/${deploy}" -n openshift-cnv 2>/dev/null || true
     done
@@ -193,7 +206,27 @@ refresh_cdi_certificates() {
     echo "  CDI certificates refreshed"
 }
 
-echo "[4/8] Waiting for TLS certificates and restarting pods..."
+echo "[4/9] Reconfiguring MetalLB for current subnet..."
+if oc get crd ipaddresspools.metallb.io &>/dev/null; then
+    NODE_IP=$(oc get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+    SUBNET_PREFIX=$(echo "${NODE_IP}" | cut -d. -f1-3)
+    echo "  Node IP: ${NODE_IP}, configuring pool: ${SUBNET_PREFIX}.240-${SUBNET_PREFIX}.250"
+    cat <<METALLBEOF | oc apply -f -
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: caas-address-pool
+  namespace: metallb-system
+spec:
+  addresses:
+    - ${SUBNET_PREFIX}.240-${SUBNET_PREFIX}.250
+  autoAssign: true
+METALLBEOF
+else
+    echo "  MetalLB not installed, skipping"
+fi
+
+echo "[5/9] Waiting for TLS certificates and restarting pods..."
 refresh_cdi_certificates &
 pid_cdi=$!
 pids=()
@@ -214,10 +247,14 @@ failed=0
 for pid in "${pids[@]}"; do wait "${pid}" || failed=1; done
 wait ${pid_cdi} || failed=1
 if (( failed )); then echo "ERROR: TLS certificates or fulfillment rollouts not ready"; exit 1; fi
-echo "[4/8] TLS certificates ready, restarting fulfillment pods..."
+echo "[5/9] TLS certificates ready, restarting pods..."
 for deploy in fulfillment-controller fulfillment-grpc-server fulfillment-rest-gateway fulfillment-ingress-proxy; do
     oc rollout restart "deploy/${deploy}" -n "${INSTALLER_NAMESPACE}"
 done
+if oc get deploy assisted-service -n multicluster-engine &>/dev/null; then
+    oc rollout restart deploy/assisted-service -n multicluster-engine
+    oc rollout restart statefulset/assisted-image-service -n multicluster-engine
+fi
 
 # Fulfillment rollouts, AAP configuration, and AAP controller wait run in parallel.
 # Keycloak sync from above also continues in the background.
@@ -231,19 +268,24 @@ wait_fulfillment_rollouts() {
     local failed=0
     for pid in "${pids[@]}"; do wait "${pid}" || failed=1; done
     if (( failed )); then echo "ERROR: Fulfillment rollout failed"; exit 1; fi
-    echo "[4/8] Fulfillment rollouts complete"
+    echo "[5/9] Fulfillment rollouts complete"
 }
 
 apply_aap_configuration() {
-    echo "[5/8] Applying AAP configuration..."
+    echo "[6/9] Applying AAP configuration..."
+    local hcbd=""
+    if oc get configmap cluster-fulfillment-ig -n "${INSTALLER_NAMESPACE}" &>/dev/null; then
+        hcbd="${HOSTED_CLUSTER_BASE_DOMAIN:-${CLUSTER_DOMAIN}}"
+    fi
+    HOSTED_CLUSTER_BASE_DOMAIN="${hcbd}" \
     INSTALLER_NAMESPACE="${INSTALLER_NAMESPACE}" \
     INSTALLER_KUSTOMIZE_OVERLAY="${INSTALLER_KUSTOMIZE_OVERLAY}" \
         ./scripts/aap-configuration.sh
-    echo "[5/8] AAP configuration applied"
+    echo "[6/9] AAP configuration applied"
 }
 
 wait_aap_controller() {
-    echo "[6/8] Waiting for AAP controller..."
+    echo "[7/9] Waiting for AAP controller..."
     retry_until 300 10 '[[ "$(oc get automationcontroller osac-aap-controller -n '"${INSTALLER_NAMESPACE}"' -o jsonpath='"'"'{.status.conditions[?(@.type=="Running")].status}'"'"' 2>/dev/null)" == "True" ]]' || {
         echo "Timed out waiting for AAP controller to be Running"
         exit 1
@@ -256,7 +298,7 @@ wait_aap_controller() {
     # Recert restarts the kube-apiserver, breaking the controller-task's
     # in-cluster connections. The pod looks healthy but its scheduler can't
     # launch jobs via container groups. Recycle the pod for fresh connections.
-    echo "[6/8] Recycling AAP controller-task pod..."
+    echo "[7/9] Recycling AAP controller-task pod..."
     oc delete pod -n "${INSTALLER_NAMESPACE}" -l app.kubernetes.io/name=osac-aap-controller-task
     oc wait pod -n "${INSTALLER_NAMESPACE}" -l app.kubernetes.io/name=osac-aap-controller-task \
         --for=condition=Ready --timeout=300s
@@ -264,7 +306,7 @@ wait_aap_controller() {
         echo "Timed out waiting for AAP gateway after controller-task restart"
         exit 1
     }
-    echo "[6/8] AAP controller Running, gateway responding"
+    echo "[7/9] AAP controller Running, gateway responding"
 }
 
 wait_fulfillment_rollouts &
@@ -283,11 +325,11 @@ wait ${pid_kc_sync} || { echo "ERROR: Keycloak sync failed"; exit 1; }
 
 oc config set-context --current --namespace="${INSTALLER_NAMESPACE}"
 
-echo "[7/8] Configuring AAP access and fulfillment service..."
+echo "[8/9] Configuring AAP access and fulfillment service..."
 ./scripts/prepare-aap.sh
 ./scripts/prepare-fulfillment-service.sh
 
-echo "[8/8] Restarting fulfillment pods and configuring tenant..."
+echo "[9/9] Restarting fulfillment pods and configuring tenant..."
 for deploy in fulfillment-controller fulfillment-grpc-server fulfillment-rest-gateway fulfillment-ingress-proxy; do
     oc rollout restart "deploy/${deploy}" -n "${INSTALLER_NAMESPACE}"
 done

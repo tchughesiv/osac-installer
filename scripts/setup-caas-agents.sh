@@ -10,6 +10,7 @@ set -o pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib.sh"
 
+INSTALLER_NAMESPACE=${INSTALLER_NAMESPACE:-"osac-e2e-ci"}
 AGENT_NAMESPACE=${AGENT_NAMESPACE:-"hardware-inventory"}
 AGENT_RESOURCE_CLASS=${AGENT_RESOURCE_CLASS:-"ci-worker"}
 AGENT_VM_NAME=${AGENT_VM_NAME:-"agent-worker-01"}
@@ -25,15 +26,48 @@ echo "Agent namespace: ${AGENT_NAMESPACE}"
 echo "Resource class: ${AGENT_RESOURCE_CLASS}"
 echo ""
 
-# Create agent namespace
+NODE_IP=$(oc get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}')
+CLUSTER_DOMAIN=$(oc get ingresses.config/cluster -o jsonpath='{.spec.domain}')
+echo "Node IP: ${NODE_IP}"
+echo "Cluster domain: ${CLUSTER_DOMAIN}"
+
+echo "[1/6] Registering '${AGENT_RESOURCE_CLASS}' host type in fulfillment service..."
+INTERNAL_API="https://$(oc get route fulfillment-internal-api -n "${INSTALLER_NAMESPACE}" -o jsonpath='{.status.ingress[0].host}')"
+TOKEN=$(oc create token -n "${INSTALLER_NAMESPACE}" admin)
+HTTP_CODE=$(curl -sk -o /dev/null -w "%{http_code}" -X POST "${INTERNAL_API}/api/private/v1/host_types" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "{\"id\": \"${AGENT_RESOURCE_CLASS}\", \"title\": \"CI Worker\", \"description\": \"Worker nodes for CI testing\"}")
+if [[ "${HTTP_CODE}" == "200" || "${HTTP_CODE}" == "201" ]]; then
+    echo "  Host type '${AGENT_RESOURCE_CLASS}' created"
+elif [[ "${HTTP_CODE}" == "409" ]]; then
+    echo "  Host type '${AGENT_RESOURCE_CLASS}' already exists"
+else
+    echo "  ERROR: Failed to create host type (HTTP ${HTTP_CODE})"
+    exit 1
+fi
+
+echo "[2/6] Creating agent namespace and CAPI provider role..."
 oc create namespace "${AGENT_NAMESPACE}" --dry-run=client -o yaml | oc apply -f -
 
-# Copy pull secret to agent namespace
+cat <<EOF | oc apply -f -
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: capi-provider-role
+  namespace: ${AGENT_NAMESPACE}
+rules:
+- apiGroups: ["agent-install.openshift.io"]
+  resources: ["agents"]
+  verbs: ["*"]
+EOF
+
+echo "[3/6] Creating InfraEnv..."
+
 oc get secret pull-secret -n openshift-config -o json \
   | python3 -c "import json,sys; s=json.load(sys.stdin); s['metadata']={'name':'pull-secret','namespace':'${AGENT_NAMESPACE}'}; json.dump(s,sys.stdout)" \
   | oc apply -f -
 
-# Create InfraEnv
 cat <<EOF | oc apply -f -
 apiVersion: agent-install.openshift.io/v1beta1
 kind: InfraEnv
@@ -45,7 +79,6 @@ spec:
     name: pull-secret
 EOF
 
-# Wait for ISO URL
 echo "Waiting for discovery ISO URL..."
 retry_until 300 5 '[[ -n "$(oc get infraenv ${AGENT_NAMESPACE} -n ${AGENT_NAMESPACE} -o jsonpath="{.status.isoDownloadURL}" 2>/dev/null)" ]]' || {
     echo "Timed out waiting for ISO URL"
@@ -54,23 +87,36 @@ retry_until 300 5 '[[ -n "$(oc get infraenv ${AGENT_NAMESPACE} -n ${AGENT_NAMESP
 ISO_URL=$(oc get infraenv "${AGENT_NAMESPACE}" -n "${AGENT_NAMESPACE}" -o jsonpath='{.status.isoDownloadURL}')
 echo "ISO URL: ${ISO_URL}"
 
-# Create and boot agent VM on the bare metal host
-echo "Creating agent VM on bare metal host..."
+echo "[4/6] Configuring host DNS for ISO download..."
+timeout -s 9 2m ssh -F "${SSH_CONFIG}" ci_machine bash -s \
+    "${NODE_IP}" \
+    "${CLUSTER_DOMAIN}" \
+    <<'DNSEOF'
+set -euo pipefail
+NODE_IP="$1"
+CLUSTER_DOMAIN="$2"
+
+# The host needs to resolve *.apps for the ISO download (curl runs on host).
+# VMs resolve via the libvirt network's dnsmasq wildcard (set by cluster-tool).
+SLUG=$(echo "${CLUSTER_DOMAIN}" | sed 's/[^a-zA-Z0-9]/-/g')
+echo "address=/.${CLUSTER_DOMAIN}/${NODE_IP}" > "/etc/dnsmasq.d/${SLUG}.conf"
+systemctl restart dnsmasq
+echo "  *.${CLUSTER_DOMAIN} -> ${NODE_IP}"
+DNSEOF
+
+echo "[5/6] Creating agent VM..."
 timeout -s 9 10m ssh -F "${SSH_CONFIG}" ci_machine bash -s <<SSHEOF
 set -euo pipefail
 
 mkdir -p ${AGENT_VM_STORAGE_DIR}
 
-# Download discovery ISO
 echo "Downloading discovery ISO..."
 curl -k -L --fail -o ${AGENT_VM_STORAGE_DIR}/discovery.iso '${ISO_URL}'
 
-# Remove existing VM if present
 virsh destroy ${AGENT_VM_NAME} 2>/dev/null || true
 virsh undefine ${AGENT_VM_NAME} 2>/dev/null || true
 rm -f ${AGENT_VM_STORAGE_DIR}/${AGENT_VM_NAME}.qcow2
 
-# Create disk and VM
 qemu-img create -f qcow2 ${AGENT_VM_STORAGE_DIR}/${AGENT_VM_NAME}.qcow2 ${AGENT_VM_DISK_SIZE}
 
 virt-install \
@@ -87,14 +133,12 @@ virt-install \
 echo "Agent VM created and booting"
 SSHEOF
 
-# Wait for agent to register
-echo "Waiting for agent to register..."
-retry_until 300 15 '[[ $(oc get agent -n ${AGENT_NAMESPACE} --no-headers 2>/dev/null | wc -l) -gt 0 ]]' || {
+echo "[6/6] Waiting for agent to register..."
+retry_until 600 10 '[[ $(oc get agent -n ${AGENT_NAMESPACE} --no-headers 2>/dev/null | wc -l) -gt 0 ]]' || {
     echo "Timed out waiting for agent to register"
     exit 1
 }
 
-# Label and approve the agent
 AGENT_NAME=$(oc get agent -n "${AGENT_NAMESPACE}" -o jsonpath='{.items[0].metadata.name}')
 echo "Agent registered: ${AGENT_NAME}"
 

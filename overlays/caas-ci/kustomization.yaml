@@ -122,11 +122,6 @@ patches:
       - op: add
         path: /spec/template/spec/containers/0/env/-
         value:
-          name: OSAC_MINIMUM_REQUEST_INTERVAL
-          value: "2m"
-      - op: add
-        path: /spec/template/spec/containers/0/env/-
-        value:
           name: OSAC_AAP_TOKEN
           valueFrom:
             secretKeyRef:

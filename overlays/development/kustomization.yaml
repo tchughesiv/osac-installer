@@ -125,11 +125,6 @@ patches:
       - op: add
         path: /spec/template/spec/containers/0/env/-
         value:
-          name: OSAC_PROVISIONING_PROVIDER
-          value: "aap"
-      - op: add
-        path: /spec/template/spec/containers/0/env/-
-        value:
           name: OSAC_AAP_TEMPLATE_PREFIX
           value: osac
       - op: add
@@ -156,11 +151,6 @@ patches:
         value:
           name: OSAC_AAP_STATUS_POLL_INTERVAL
           value: "30s"
-      - op: add
-        path: /spec/template/spec/containers/0/env/-
-        value:
-          name: OSAC_MINIMUM_REQUEST_INTERVAL
-          value: "2m"
       - op: add
         path: /spec/template/spec/containers/0/env/-
         value:

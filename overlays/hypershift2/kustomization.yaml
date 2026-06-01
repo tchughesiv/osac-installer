@@ -20,16 +20,20 @@ patches:
             containers:
             - name: manager
               env:
-              - name: OSAC_CLUSTER_CREATE_WEBHOOK
-                value: http://osac-eda-service:5000/create-hosted-cluster
-              - name: OSAC_CLUSTER_DELETE_WEBHOOK
-                value: http://osac-eda-service:5000/delete-hosted-cluster
-              - name: OSAC_VM_CREATE_WEBHOOK
-                value: http://osac-eda-service:5000/create-vm
-              - name: OSAC_VM_DELETE_WEBHOOK
-                value: http://osac-eda-service:5000/delete-vm
-              - name: OSAC_MINIMUM_REQUEST_INTERVAL
-                value: "2m"
+              - name: OSAC_AAP_TEMPLATE_PREFIX
+                value: osac
+              - name: OSAC_AAP_URL
+                value: "https://osac-aap-osac.apps.hypershift2.nerc.mghpcc.org/api/controller"
+              - name: OSAC_AAP_TOKEN
+                valueFrom:
+                  secretKeyRef:
+                    name: osac-aap-api-token
+                    key: token
+                    optional: true
+              - name: OSAC_AAP_INSECURE_SKIP_VERIFY
+                value: "true"
+              - name: OSAC_AAP_STATUS_POLL_INTERVAL
+                value: "30s"
               - name: OSAC_FULFILLMENT_SERVER_ADDRESS
                 value: fulfillment-internal-api:8001
 

@@ -46,17 +46,6 @@
           "minimum": 1,
           "default": 1
         },
-        "provisioning": {
-          "type": "object",
-          "properties": {
-            "provider": {
-              "type": "string",
-              "description": "Provisioning provider",
-              "enum": ["aap", "eda"],
-              "default": "aap"
-            }
-          }
-        },
         "aap": {
           "type": "object",
           "description": "AAP connection settings for the operator",

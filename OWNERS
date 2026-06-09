@@ -1,22 +1,24 @@
-approvers:
-- jhernand
-- adriengentil
-- tzvatot
-- larsks
-- tzumainn
-- akshaynadkarni
-- trewest
-- danmanor
-- omer-vishlitzky
-- eranco74
-reviewers:
-- jhernand
-- adriengentil
-- tzvatot
-- larsks
-- tzumainn
-- akshaynadkarni
-- trewest
-- danmanor
-- omer-vishlitzky
-- eranco74
+filters:
+  "[^.]":
+    approvers:
+    - jhernand
+    - adriengentil
+    - tzvatot
+    - larsks
+    - tzumainn
+    - akshaynadkarni
+    - trewest
+    - danmanor
+    - omer-vishlitzky
+    - eranco74
+    reviewers:
+    - jhernand
+    - adriengentil
+    - tzvatot
+    - larsks
+    - tzumainn
+    - akshaynadkarni
+    - trewest
+    - danmanor
+    - omer-vishlitzky
+    - eranco74

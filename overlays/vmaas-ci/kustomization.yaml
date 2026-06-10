@@ -84,10 +84,10 @@ patches:
     patch: |-
       - op: replace
         path: /spec/template/spec/containers/0/command/7
-        value: "--auth-issuer-url=https://keycloak.keycloak.svc.cluster.local/realms/osac"
+        value: "--auth-issuer-url=https://osac-keycloak.keycloak.svc.cluster.local/realms/osac"
       - op: replace
         path: /spec/template/spec/containers/0/command/11
-        value: "--idp-url=https://keycloak.keycloak.svc.cluster.local"
+        value: "--idp-url=https://osac-keycloak.keycloak.svc.cluster.local"
   - target:
       kind: Deployment
       name: osac-operator-controller-manager
@@ -160,7 +160,7 @@ patches:
         authentication:
           keycloak-jwt:
             jwt:
-              issuerUrl: https://keycloak.keycloak.svc.cluster.local/realms/osac
+              issuerUrl: https://osac-keycloak.keycloak.svc.cluster.local/realms/osac
         authorization:
           default:
             opa:

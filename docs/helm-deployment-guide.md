@@ -619,8 +619,8 @@ Key settings to review in your values file:
 | Setting | Description | Where to Find |
 |---------|-------------|---------------|
 | `operator.aap.url` | AAP controller API URL | Set post-install by `prepare-aap.sh` |
-| `service.auth.issuerUrl` | Keycloak realm URL | `https://keycloak.keycloak.svc.cluster.local/realms/osac` (default works) |
-| `service.idp.url` | Keycloak base URL | `https://keycloak.keycloak.svc.cluster.local` (default works) |
+| `service.auth.issuerUrl` | Keycloak realm URL | `https://osac-keycloak.keycloak.svc.cluster.local/realms/osac` (default works) |
+| `service.idp.url` | Keycloak base URL | `https://osac-keycloak.keycloak.svc.cluster.local` (default works) |
 | `service.database.connection` | PostgreSQL connection | Referenced from `fulfillment-db` secret |
 | `aap.aap.instance.enabled` | Create AAP instance CR | `true` (chart manages AAP instance) |
 | `aap.bootstrap.enabled` | Run bootstrap job | `true` (configures AAP with job templates) |

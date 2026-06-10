@@ -1,0 +1,27 @@
+# Default scenario: validates that the chart renders with minimal overrides.
+# Only sets values that subcharts mark as required.
+
+service:
+  auth:
+    issuerUrl: https://keycloak.example.com/realms/osac
+    controllerCredentials:
+    - secret:
+        name: fulfillment-controller-credentials
+        items:
+        - key: client-id
+          param: client-id
+  idp:
+    url: https://keycloak.example.com
+    credentials:
+    - secret:
+        name: fulfillment-controller-credentials
+        items:
+        - key: client-id
+          param: client-id
+  database:
+    connection:
+    - secret:
+        name: fulfillment-db
+        items:
+        - key: url
+          param: url

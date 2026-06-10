@@ -23,16 +23,30 @@ jobs:
       with:
         version: v3.17.0
 
+    - name: Set up chart-testing
+      uses: helm/chart-testing-action@6ec842c01de15ebb84c8627d2744a0c2f2755c9f  # v2.8.0
+
     - name: Build chart dependencies
       run: helm dependency build charts/osac/
 
-    - name: Lint umbrella chart
-      run: helm lint charts/osac/
+    - name: Run chart-testing lint
+      run: ct lint --all --config ct.yaml
 
-    - name: Template umbrella chart (dry-run)
-      run: helm template osac charts/osac/ --values values/development.yaml > /dev/null
+    - name: Template with CI values
+      run: |
+        set -euo pipefail
+        for f in charts/osac/ci/*-values.yaml; do
+          echo "--- helm template with $(basename "$f") ---"
+          helm template osac charts/osac/ --values "$f" > /dev/null
+        done
+
+    - name: Template with environment values
+      run: |
+        set -euo pipefail
+        for f in values/*.yaml; do
+          echo "--- helm template with $(basename "$f") ---"
+          helm template osac charts/osac/ --values "$f" > /dev/null
+        done
 
     - name: Validate values schema
-      run: |
-        # Ensure values.schema.json is valid JSON
-        python3 -m json.tool charts/osac/values.schema.json > /dev/null
+      run: python3 -m json.tool charts/osac/values.schema.json > /dev/null

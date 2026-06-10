@@ -1,0 +1,37 @@
+# No-AAP scenario: AAP managed externally, bootstrap and validation disabled.
+# Exercises the disabled-AAP template branches.
+
+service:
+  auth:
+    issuerUrl: https://keycloak.example.com/realms/osac
+    controllerCredentials:
+    - secret:
+        name: fulfillment-controller-credentials
+        items:
+        - key: client-id
+          param: client-id
+  idp:
+    url: https://keycloak.example.com
+    credentials:
+    - secret:
+        name: fulfillment-controller-credentials
+        items:
+        - key: client-id
+          param: client-id
+  database:
+    connection:
+    - secret:
+        name: fulfillment-db
+        items:
+        - key: url
+          param: url
+
+aap:
+  aap:
+    instance:
+      enabled: false
+  bootstrap:
+    enabled: false
+
+validation:
+  enabled: false

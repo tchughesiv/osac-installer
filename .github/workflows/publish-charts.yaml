@@ -4,6 +4,23 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Chart version (without v prefix, e.g. 0.0.1). Defaults to git tag.'
+        required: false
+      operator_crds_version:
+        description: 'osac-operator-crds chart version (e.g. 0.0.1)'
+        required: true
+      operator_version:
+        description: 'osac-operator chart version (e.g. 0.0.1)'
+        required: true
+      service_version:
+        description: 'fulfillment-service chart version (e.g. 0.0.64)'
+        required: true
+      aap_version:
+        description: 'osac-aap chart version (e.g. 0.0.3)'
+        required: true
 
 concurrency:
   group: publish-charts-${{ github.ref }}
@@ -24,7 +41,6 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
       with:
-        submodules: recursive
         persist-credentials: false
 
     - name: Set up Helm
@@ -35,29 +51,84 @@ jobs:
     - name: Log in to GHCR
       run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
 
-    - name: Extract and validate version from tag
-      id: version
+    - name: Resolve versions
+      id: versions
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_CRDS_VERSION: ${{ inputs.operator_crds_version }}
+        INPUT_OPERATOR_VERSION: ${{ inputs.operator_version }}
+        INPUT_SERVICE_VERSION: ${{ inputs.service_version }}
+        INPUT_AAP_VERSION: ${{ inputs.aap_version }}
       run: |
-        version="${GITHUB_REF_NAME#v}"
-        if ! [[ "${version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?(\+[a-zA-Z0-9.]+)?$ ]]; then
-          echo "::error::Invalid semver: ${version}"
+        SEMVER_RE='^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?(\+[a-zA-Z0-9.]+)?$'
+
+        # Umbrella chart version: from input, or from git tag
+        if [ -n "${INPUT_VERSION}" ]; then
+          version="${INPUT_VERSION}"
+        else
+          version="${GITHUB_REF_NAME#v}"
+        fi
+
+        if ! [[ "${version}" =~ ${SEMVER_RE} ]]; then
+          echo "::error::Invalid semver for umbrella version: ${version}"
           exit 1
         fi
+
+        # Component versions: from inputs (workflow_dispatch) or default to umbrella version
+        crds_ver="${INPUT_CRDS_VERSION}"
+        operator_ver="${INPUT_OPERATOR_VERSION}"
+        service_ver="${INPUT_SERVICE_VERSION}"
+        aap_ver="${INPUT_AAP_VERSION}"
+
+        # When triggered by tag push (no inputs), use the umbrella version for all components
+        : "${crds_ver:=${version}}"
+        : "${operator_ver:=${version}}"
+        : "${service_ver:=${version}}"
+        : "${aap_ver:=${version}}"
+
+        # Validate all component versions
+        for pair in "osac-operator-crds:${crds_ver}" "osac-operator:${operator_ver}" "fulfillment-service:${service_ver}" "osac-aap:${aap_ver}"; do
+          name="${pair%%:*}"
+          ver="${pair#*:}"
+          if ! [[ "${ver}" =~ ${SEMVER_RE} ]]; then
+            echo "::error::Invalid semver for ${name}: ${ver}"
+            exit 1
+          fi
+        done
+
         echo "version=${version}" >> "$GITHUB_OUTPUT"
+        echo "crds_ver=${crds_ver}" >> "$GITHUB_OUTPUT"
+        echo "operator_ver=${operator_ver}" >> "$GITHUB_OUTPUT"
+        echo "service_ver=${service_ver}" >> "$GITHUB_OUTPUT"
+        echo "aap_ver=${aap_ver}" >> "$GITHUB_OUTPUT"
+
+        echo "--- Resolved versions ---"
+        echo "Umbrella:           ${version}"
+        echo "osac-operator-crds: ${crds_ver}"
+        echo "osac-operator:      ${operator_ver}"
+        echo "fulfillment-service: ${service_ver}"
+        echo "osac-aap:           ${aap_ver}"
 
     - name: Rewrite dependencies to OCI references
+      env:
+        CRDS_VER: ${{ steps.versions.outputs.crds_ver }}
+        OPERATOR_VER: ${{ steps.versions.outputs.operator_ver }}
+        SERVICE_VER: ${{ steps.versions.outputs.service_ver }}
+        AAP_VER: ${{ steps.versions.outputs.aap_ver }}
       run: |
-        VERSION="${{ steps.version.outputs.version }}"
         cd charts/osac
+        OCI_REPO="oci://${{ env.REGISTRY }}/${{ env.CHARTS_REPO }}"
 
-        # Replace file:// references with OCI registry references and pin versions
-        sed -i \
-          -e 's|repository: "file://../../base/osac-operator/charts/operator-crds"|repository: "oci://'"${{ env.REGISTRY }}"'/'"${{ env.CHARTS_REPO }}"'"|' \
-          -e 's|repository: "file://../../base/osac-operator/charts/operator"|repository: "oci://'"${{ env.REGISTRY }}"'/'"${{ env.CHARTS_REPO }}"'"|' \
-          -e 's|repository: "file://../../base/osac-fulfillment-service/charts/service"|repository: "oci://'"${{ env.REGISTRY }}"'/'"${{ env.CHARTS_REPO }}"'"|' \
-          -e 's|repository: "file://../../base/osac-aap/charts/aap"|repository: "oci://'"${{ env.REGISTRY }}"'/'"${{ env.CHARTS_REPO }}"'"|' \
-          -e 's|version: "0.0.0"|version: "'"${VERSION}"'"|' \
-          Chart.yaml
+        yq -i "
+          (.dependencies[] | select(.name == \"osac-operator-crds\")) .repository = \"${OCI_REPO}\" |
+          (.dependencies[] | select(.name == \"osac-operator-crds\")) .version = \"${CRDS_VER}\" |
+          (.dependencies[] | select(.name == \"osac-operator\")) .repository = \"${OCI_REPO}\" |
+          (.dependencies[] | select(.name == \"osac-operator\")) .version = \"${OPERATOR_VER}\" |
+          (.dependencies[] | select(.name == \"fulfillment-service\")) .repository = \"${OCI_REPO}\" |
+          (.dependencies[] | select(.name == \"fulfillment-service\")) .version = \"${SERVICE_VER}\" |
+          (.dependencies[] | select(.name == \"osac-aap\")) .repository = \"${OCI_REPO}\" |
+          (.dependencies[] | select(.name == \"osac-aap\")) .version = \"${AAP_VER}\"
+        " Chart.yaml
 
         # Remove stale Chart.lock so helm pulls fresh from OCI
         rm -f Chart.lock
@@ -69,19 +140,24 @@ jobs:
       run: helm dependency build charts/osac/
 
     - name: Update image tags in values.yaml
+      env:
+        VERSION: ${{ steps.versions.outputs.version }}
       run: |
-        VERSION="${{ steps.version.outputs.version }}"
         sed -i \
           -e "s|tag: latest|tag: v${VERSION}|g" \
           charts/osac/values.yaml
 
     - name: Package chart
+      env:
+        VERSION: ${{ steps.versions.outputs.version }}
       run: |
         helm package charts/osac/ \
-          --version "${{ steps.version.outputs.version }}" \
-          --app-version "${{ steps.version.outputs.version }}"
+          --version "${VERSION}" \
+          --app-version "${VERSION}"
 
     - name: Push chart to GHCR
+      env:
+        VERSION: ${{ steps.versions.outputs.version }}
       run: |
-        helm push osac-${{ steps.version.outputs.version }}.tgz \
+        helm push "osac-${VERSION}.tgz" \
           oci://${{ env.REGISTRY }}/${{ env.CHARTS_REPO }}

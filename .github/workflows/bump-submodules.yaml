@@ -36,8 +36,8 @@ jobs:
               -H "Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json" \
               "https://ghcr.io/v2/osac-project/${image}/manifests/${tag}")
             if [[ "${code}" != "200" ]]; then
-              echo "ERROR: ${repo} latest main commit ${sha:0:7} has no published image (tag ${tag})" >&2
-              return 1
+              echo "WARN: ${repo} latest main commit ${sha:0:7} has no published image (tag ${tag}), skipping" >&2
+              return 0
             fi
             echo "${sha}"
           }
@@ -45,6 +45,10 @@ jobs:
           OPERATOR=$(check_image osac-operator osac-operator)
           FULFILLMENT=$(check_image fulfillment-service fulfillment-service)
           AAP=$(check_image osac-aap osac-aap)
+
+          if [[ -z "${OPERATOR}" && -z "${FULFILLMENT}" && -z "${AAP}" ]]; then
+            echo "No components have published images for latest main commits; nothing to bump"
+          fi
 
           echo "operator=${OPERATOR}" >> "$GITHUB_OUTPUT"
           echo "fulfillment=${FULFILLMENT}" >> "$GITHUB_OUTPUT"
@@ -60,6 +64,11 @@ jobs:
             local path=$1
             local name=$2
             local target=$3
+            if [[ -z "${target}" ]]; then
+              echo "${name}: skipped (no published image for latest main commit)"
+              summary="${summary}- **${name}**: skipped (no published image for latest main commit)\n"
+              return
+            fi
             local current
             current=$(git -C "${path}" rev-parse HEAD)
             if [[ "${current}" == "${target}" ]]; then
@@ -118,6 +127,7 @@ jobs:
           $(cat /tmp/bump-summary.txt)
 
           Only bumps to commits that have a published container image in GHCR.
+          Components without a published image for the latest main commit are left unchanged.
           Runs every 3 hours via [bump-submodules workflow](../actions/workflows/bump-submodules.yaml).
           BODY_EOF
           )

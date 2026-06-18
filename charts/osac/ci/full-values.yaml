@@ -62,6 +62,8 @@ clusterFulfillment:
   config:
     NETWORK_CLASS: "netris"
     NETWORK_STEPS_COLLECTION: "netris.steps"
+    DNS_CLASS: "dns.route53.dns"
+    DNS_ZONE: "test.example.com"
     NETRIS_CONTROLLER_URL: "https://test-ctl.netris.io"
     NETRIS_USERNAME: "testuser"
     NETRIS_SITE_ID: "1"

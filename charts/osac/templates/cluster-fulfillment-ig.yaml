@@ -1,4 +1,11 @@
 {{- if .Values.clusterFulfillment.enabled }}
+{{- $ingress := lookup "config.openshift.io/v1" "Ingress" "" "cluster" }}
+{{- $ingressDomain := "" }}
+{{- if $ingress }}{{- $ingressDomain = $ingress.spec.domain | default "" }}{{- end }}
+{{- $baseDomain := "" }}
+{{- if $ingressDomain }}
+{{- $baseDomain = printf "hosted.%s" ($ingressDomain | trimPrefix "apps.") }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -9,10 +16,11 @@ metadata:
     osac.openshift.io/project: osac-aap
 data:
   {{- range $key, $val := .Values.clusterFulfillment.config }}
-  {{- if $val }}
+  {{- if and $val (ne $key "HOSTED_CLUSTER_BASE_DOMAIN") }}
   {{ $key }}: {{ $val | quote }}
   {{- end }}
   {{- end }}
+  HOSTED_CLUSTER_BASE_DOMAIN: {{ .Values.clusterFulfillment.config.HOSTED_CLUSTER_BASE_DOMAIN | default $baseDomain | quote }}
 ---
 apiVersion: v1
 kind: Secret

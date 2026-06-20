@@ -77,9 +77,9 @@ fulfillment_tag="sha-$(git -C "${REPO_ROOT}" submodule status base/osac-fulfillm
 aap_tag="sha-$(git -C "${REPO_ROOT}" submodule status base/osac-aap | awk '{print $1}' | tr -d ' +-' | cut -c1-7)"
 bmf_tag="sha-$(git -C "${REPO_ROOT}" submodule status base/bare-metal-fulfillment-operator | awk '{print $1}' | tr -d ' +-' | cut -c1-7)"
 
-for values_file in "${REPO_ROOT}"/values/*.yaml; do
+for values_file in "${REPO_ROOT}"/values/*/values.yaml; do
   [[ ! -f "${values_file}" ]] && continue
-  name=$(basename "${values_file}")
+  name=$(basename "$(dirname "${values_file}")")
   grep -q "sha-" "${values_file}" || continue
 
   for pair in \
@@ -93,6 +93,9 @@ for values_file in "${REPO_ROOT}"/values/*.yaml; do
     expected="${rest#* }"
 
     if [[ "${mode}" == "tag" ]]; then
+      # Skip components not configured in this values file (e.g. BMF disabled in vmaas-ci).
+      # Must check before the pipeline below — pipefail would abort on grep returning 1.
+      grep -q "repository: ghcr.io/osac-project/${component}$" "${values_file}" || continue
       current=$(grep -A1 "repository: ghcr.io/osac-project/${component}$" "${values_file}" | grep "tag:" | awk '{print $2}')
       [[ -z "${current}" ]] && continue
       if [[ "${current}" == "${expected}" ]]; then
@@ -118,6 +121,21 @@ for values_file in "${REPO_ROOT}"/values/*.yaml; do
       fi
     fi
   done
+
+  # Sync projectGitBranch (full 40-char commit) with osac-aap submodule.
+  aap_full_commit=$(git -C "${REPO_ROOT}" submodule status base/osac-aap | awk '{print $1}' | tr -d ' +-')
+  grep -q "projectGitBranch:" "${values_file}" || continue
+  current_branch=$(grep "projectGitBranch:" "${values_file}" | head -1 | sed 's/.*projectGitBranch: *"\{0,1\}\([^"]*\)"\{0,1\}/\1/')
+  [[ -z "${current_branch}" ]] && continue
+  if [[ "${current_branch}" == "${aap_full_commit}" ]]; then
+    echo "${name} projectGitBranch: OK"
+  elif [[ "${1:-}" == "--fix" ]]; then
+    sed -i "s|projectGitBranch: .*|projectGitBranch: \"${aap_full_commit}\"|" "${values_file}"
+    echo "${name} projectGitBranch: FIXED ${current_branch} -> ${aap_full_commit}"
+  else
+    echo "${name} projectGitBranch: MISMATCH current=${current_branch} expected=${aap_full_commit}"
+    errors=$((errors + 1))
+  fi
 done
 
 if [[ ${errors} -gt 0 ]]; then

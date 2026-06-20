@@ -12,18 +12,19 @@ operator:
   aap:
     insecureSkipVerify: "true"
   fulfillment:
-    serverAddress: "fulfillment-api:8000"
+    serverAddress: "fulfillment-internal-api:8001"
     tokenFile: "/var/run/secrets/kubernetes.io/serviceaccount/token"
   controllers:
+    clusterOrder: false
     computeInstance: true
     tenant: true
     networking: true
 
 # --- Fulfillment Service ---
 service:
-  variant: openshift
   externalHostname: ""  # Set to fulfillment-api-<namespace>.apps.<cluster>.<domain>
   internalHostname: ""  # Set to fulfillment-internal-api-<namespace>.apps.<cluster>.<domain>
+  variant: openshift
   images:
     service: ghcr.io/osac-project/fulfillment-service:sha-a553eee
     envoy: ghcr.io/osac-project/envoy:v1.33.0
@@ -87,19 +88,19 @@ aap:
   configAsCode:
     manifestSecret: "config-as-code-manifest-ig"
     secret: "config-as-code-ig"
+    eeImage: "ghcr.io/osac-project/osac-aap:sha-1ada6eb"
+    projectGitUri: "https://github.com/osac-project/osac-aap"
+    projectGitBranch: "75b6796848f5589d9b9ff5591937509c64c1ef45"
 
 # --- Validation ---
 validation:
   enabled: true
 
+# --- Bare Metal Fulfillment Operator ---
+bmf:
+  enabled: false
+
 # --- Database migration ---
 dbMigrate:
   enabled: false
   image: ghcr.io/osac-project/fulfillment-service:sha-a553eee
-
-# --- Bare Metal Fulfillment Operator ---
-bmf:
-  image:
-    repository: ghcr.io/osac-project/bare-metal-fulfillment-operator
-    tag: sha-0a06955
-    pullPolicy: Always

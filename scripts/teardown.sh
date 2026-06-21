@@ -304,7 +304,7 @@ CRD_PATTERN='cert-manager\.io|certmanagers\.operator|authorino|ansible\.com|kube
 echo "Final CRD cleanup (retries until all gone)..."
 for attempt in 1 2 3 4 5 6 7; do
     remaining_crds=$(timeout 10 oc get crd --no-headers 2>/dev/null | awk "/${CRD_PATTERN}/ {print \$1}")
-    count=$(echo "${remaining_crds}" | grep -c . 2>/dev/null || echo 0)
+    count=$(echo "${remaining_crds}" | grep -c . 2>/dev/null || true); count=${count//[^0-9]/}
     [[ "${count}" -eq 0 ]] && break
     echo "  Pass ${attempt}: ${count} CRDs remaining..."
 
@@ -324,7 +324,7 @@ for attempt in 1 2 3 4 5 6 7; do
     sleep 3
 done
 
-final_count=$(timeout 10 oc get crd --no-headers 2>/dev/null | awk "/${CRD_PATTERN}/" | wc -l)
+final_count=$(timeout 10 oc get crd --no-headers 2>/dev/null | awk "/${CRD_PATTERN}/" | wc -l); final_count=${final_count//[^0-9]/}
 if [[ "${final_count}" -gt 0 ]]; then
     echo "  WARNING: ${final_count} CRDs still remaining after 7 passes"
 else

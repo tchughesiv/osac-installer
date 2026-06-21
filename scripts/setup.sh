@@ -403,7 +403,12 @@ if grep -q 'console-proxy-shared-dev' \
 else
   CONSOLE_PROXY_NS="${INSTALLER_NAMESPACE}"
 fi
-wait_for_resource deployment/osac-console-proxy condition=Available 300 "${CONSOLE_PROXY_NS}"
+if [[ "${DEPLOY_MODE}" == "helm" ]]; then
+  CONSOLE_PROXY_DEPLOY="fulfillment-console-proxy"
+else
+  CONSOLE_PROXY_DEPLOY="osac-console-proxy"
+fi
+wait_for_resource deployment/${CONSOLE_PROXY_DEPLOY} condition=Available 300 "${CONSOLE_PROXY_NS}"
 
 # Wait for AAP bootstrap job to complete.
 # In kustomize mode, the job is named "aap-bootstrap".

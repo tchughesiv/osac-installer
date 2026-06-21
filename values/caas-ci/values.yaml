@@ -25,7 +25,7 @@ service:
   externalHostname: ""  # Set to fulfillment-api-<namespace>.apps.<cluster>.<domain>
   internalHostname: ""  # Set to fulfillment-internal-api-<namespace>.apps.<cluster>.<domain>
   images:
-    service: ghcr.io/osac-project/fulfillment-service:sha-a553eee
+    service: ghcr.io/osac-project/fulfillment-service:sha-e165ff0
     envoy: ghcr.io/osac-project/envoy:v1.33.0
   certs:
     issuerRef:
@@ -81,7 +81,7 @@ aap:
       name: "osac-aap"
   bootstrap:
     enabled: true
-    image: ghcr.io/osac-project/osac-aap:sha-75b6796
+    image: ghcr.io/osac-project/osac-aap:sha-01c8ef0
     cliImage: quay.io/openshift/origin-cli:4.20.0
     backoffLimit: 15
   configAsCode:
@@ -95,7 +95,7 @@ validation:
 # --- Database migration ---
 dbMigrate:
   enabled: false
-  image: ghcr.io/osac-project/fulfillment-service:sha-a553eee
+  image: ghcr.io/osac-project/fulfillment-service:sha-e165ff0
 
 clusterFulfillment:
   enabled: true

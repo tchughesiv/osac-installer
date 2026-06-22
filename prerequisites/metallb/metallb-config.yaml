@@ -27,9 +27,8 @@ metadata:
   namespace: metallb-system
 spec:
   addresses:
-    # Replace with your environment's IP range for LoadBalancer services
-    - 192.168.100.240-192.168.100.250
-  autoAssign: false
+    - 192.168.40.200-192.168.40.250
+  autoAssign: true
   avoidBuggyIPs: true  # safeguard: exclude .0 and .255 if the address range is ever extended
 ---
 apiVersion: metallb.io/v1beta1

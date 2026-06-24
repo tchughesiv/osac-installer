@@ -5,7 +5,7 @@
 operator:
   image:
     repository: ghcr.io/osac-project/osac-operator
-    tag: sha-7e4222b
+    tag: sha-773d078
     pullPolicy: Always
   provisioning:
     provider: "aap"
@@ -22,6 +22,7 @@ operator:
     computeInstance: false
     tenant: true
     networking: true
+    storageController: true
 
 # --- Fulfillment Service ---
 service:

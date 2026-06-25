@@ -243,3 +243,13 @@ networkFulfillment:
     NETRIS_TENANT_NAME: ""
   secret:
     NETRIS_PASSWORD: ""
+
+# --- MetalLB Address Pool ---
+metallb:
+  enabled: false
+  addressCIDR: "192.168.40.0/24"
+
+# --- CAPI Provider RBAC ---
+capiProvider:
+  enabled: true
+  agentNamespace: hardware-inventory

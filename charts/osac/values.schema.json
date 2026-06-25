@@ -946,6 +946,38 @@
         }
       }
     },
+    "metallb": {
+      "type": "object",
+      "description": "MetalLB IPAddressPool and L2Advertisement for LoadBalancer services",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Create MetalLB IPAddressPool and L2Advertisement",
+          "default": false
+        },
+        "addressCIDR": {
+          "type": "string",
+          "description": "CIDR range for the MetalLB address pool",
+          "default": "192.168.40.0/24"
+        }
+      }
+    },
+    "capiProvider": {
+      "type": "object",
+      "description": "CAPI Provider RBAC for Agent platform access",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Create the agent namespace and CAPI provider Role",
+          "default": true
+        },
+        "agentNamespace": {
+          "type": "string",
+          "description": "Namespace where infrastructure provider agents run",
+          "default": "hardware-inventory"
+        }
+      }
+    },
     "networkFulfillment": {
       "type": "object",
       "description": "ConfigMap and Secret for the AAP network-fulfillment instance group",

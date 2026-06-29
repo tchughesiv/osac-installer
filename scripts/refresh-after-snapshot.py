@@ -55,14 +55,17 @@ class RefreshConfig:
 
     @property
     def values_dir(self) -> str:
+        """Directory containing the Helm values file."""
         return str(Path(self.values_file).parent)
 
     @property
     def external_host(self) -> str:
+        """Public fulfillment API route hostname."""
         return f"fulfillment-api-{self.namespace}.{self.cluster_domain}"
 
     @property
     def internal_host(self) -> str:
+        """Internal fulfillment API route hostname."""
         return f"fulfillment-internal-api-{self.namespace}.{self.cluster_domain}"
 
 
@@ -106,15 +109,18 @@ def run(args: list[str], *, check: bool = True, capture: bool = False) -> subpro
 
 
 def oc(*args: str, check: bool = True, capture: bool = False) -> subprocess.CompletedProcess[str]:
+    """Run oc with the given arguments."""
     return run(["oc", *args], check=check, capture=capture)
 
 
 def oc_json(*args: str) -> dict:
+    """Run oc with -o json and return the parsed object."""
     result = oc(*args, "-o", "json", capture=True)
     return json.loads(result.stdout)
 
 
 def retry_until(*, description: str, timeout: int, interval: int, condition: Callable[[], bool]) -> None:
+    """Poll condition until it returns True or timeout expires."""
     deadline = time.time() + timeout
     while not condition():
         if time.time() >= deadline:
@@ -123,6 +129,7 @@ def retry_until(*, description: str, timeout: int, interval: int, condition: Cal
 
 
 def oc_exists(resource: str, namespace: str | None = None) -> bool:
+    """Return True when oc get succeeds for the given resource."""
     ns_args = ["-n", namespace] if namespace else []
     result = oc("get", resource, *ns_args, "--no-headers", check=False, capture=True)
     return result.returncode == 0
@@ -198,12 +205,14 @@ def _get_pod_failure(pod: dict) -> str | None:
 
 
 def _get_pod_logs(pod_name: str, namespace: str) -> str:
+    """Return the last 20 log lines for a pod."""
     result = oc("logs", f"pod/{pod_name}", "-n", namespace,
                 "--tail=20", "--all-containers", check=False, capture=True)
     return result.stdout.strip() if result.stdout else "(no logs)"
 
 
 def _get_pod_events(pod_name: str, namespace: str) -> str:
+    """Return recent Kubernetes events involving the pod."""
     result = oc(
         "get", "events", "-n", namespace,
         "--field-selector", f"involvedObject.name={pod_name}",
@@ -285,6 +294,7 @@ def check_all_pods(namespace: str) -> None:
 
 
 def patch_stale_routes(config: RefreshConfig) -> None:
+    """Rewrite route hosts that still reference the snapshot cluster domain."""
     for ns in [config.namespace, config.keycloak_ns, "multicluster-engine"]:
         if not oc_exists(f"namespace/{ns}"):
             continue
@@ -302,6 +312,7 @@ def patch_stale_routes(config: RefreshConfig) -> None:
 
 
 def refresh_cdi_certificates() -> None:
+    """Regenerate CDI TLS certificates after a cold snapshot boot."""
     if not oc_exists("namespace/openshift-cnv"):
         return
     print("  Refreshing CDI certificates...")
@@ -324,6 +335,7 @@ def refresh_cdi_certificates() -> None:
 
 
 def refresh_metallb_and_subnet() -> None:
+    """Refresh MetalLB webhook certs and apply the node subnet address pool."""
     if not oc_exists("crd/ipaddresspools.metallb.io"):
         return
     print("  Refreshing MetalLB webhook certificates...")
@@ -357,6 +369,7 @@ def refresh_metallb_and_subnet() -> None:
         "spec": {"addresses": [f"{subnet_prefix}.240-{subnet_prefix}.250"], "autoAssign": True},
     })
     def _try_apply_pool() -> bool:
+        """Apply the MetalLB IPAddressPool manifest."""
         r = subprocess.run(
             ["oc", "apply", "-f", "-"],
             input=pool_yaml, text=True, capture_output=True, cwd=str(REPO_ROOT),
@@ -374,6 +387,7 @@ def refresh_metallb_and_subnet() -> None:
 
 
 def wait_keycloak_cert(config: RefreshConfig) -> None:
+    """Wait for the Keycloak TLS certificate to become Ready."""
     print("  Waiting for Keycloak TLS certificate...")
     oc("wait", "--for=condition=Ready", "certificate/keycloak-tls",
        "-n", config.keycloak_ns, "--timeout=300s")
@@ -414,6 +428,7 @@ def pre_fix_cert_sans(config: RefreshConfig) -> None:
 
 
 def keycloak_sync(config: RefreshConfig) -> None:
+    """Re-apply Keycloak manifests and wait for the realm endpoint."""
     print("  Re-applying Keycloak from scratch...")
     oc("apply", "-k", "prerequisites/keycloak/")
     oc("rollout", "status", "deploy/keycloak-service", "-n", config.keycloak_ns,
@@ -434,6 +449,7 @@ def keycloak_sync(config: RefreshConfig) -> None:
 
 
 def create_secrets(config: RefreshConfig) -> None:
+    """Create fulfillment, AAP license, and pull secrets for the namespace."""
     print("  Creating secrets...")
     realm = json.loads((REPO_ROOT / config.realm_json).read_text())
 
@@ -467,10 +483,12 @@ def create_secrets(config: RefreshConfig) -> None:
 
 
 def ensure_ca_bundle(config: RefreshConfig) -> None:
+    """Ensure the cluster CA bundle ConfigMap exists in the install namespace."""
     run([str(SCRIPT_DIR / "ensure-ca-bundle.sh"), config.namespace])
 
 
 def wait_tls_certs(config: RefreshConfig) -> None:
+    """Wait for all cert-manager Certificates in the namespace to become Ready."""
     print("  Waiting for TLS certificates...")
     certs_data = oc_json("get", "certificates.cert-manager.io", "-n", config.namespace)
     for cert in certs_data["items"]:
@@ -484,6 +502,7 @@ def wait_tls_certs(config: RefreshConfig) -> None:
 
 
 def scale_csv_to(*, csv_name: str, namespace: str, replicas: int) -> None:
+    """Patch a ClusterServiceVersion to scale all owned Deployments."""
     csv_data = oc_json("get", "csv", csv_name, "-n", namespace)
     deploys: list[dict] = csv_data["spec"]["install"]["spec"]["deployments"]
     patch = [
@@ -500,6 +519,7 @@ def scale_csv_to(*, csv_name: str, namespace: str, replicas: int) -> None:
 
 
 def find_csv(*, namespace: str, deploy_name: str) -> str:
+    """Return the CSV name that owns the given Deployment."""
     data = oc_json("get", "csv", "-n", namespace)
     for item in data["items"]:
         deploys = item.get("spec", {}).get("install", {}).get("spec", {}).get("deployments", [])
@@ -514,6 +534,7 @@ def find_csv(*, namespace: str, deploy_name: str) -> str:
 # changing URL parsing or endpoint checks.
 
 def _bundled_postgres_enabled(values_file: str) -> bool:
+    """Return True when bundledPostgres.enabled is true in the Helm values file."""
     in_section = False
     path = REPO_ROOT / values_file
     for line in path.read_text().splitlines():
@@ -528,6 +549,7 @@ def _bundled_postgres_enabled(values_file: str) -> bool:
 
 
 def _parse_db_host_from_url(url: str) -> str:
+    """Extract the hostname from a postgres:// or postgresql:// URL."""
     if url.startswith("postgresql://"):
         url = "postgres://" + url.removeprefix("postgresql://")
     elif not url.startswith("postgres://"):
@@ -540,6 +562,7 @@ def _parse_db_host_from_url(url: str) -> str:
 
 
 def _resolve_postgres_service(host: str, install_namespace: str) -> tuple[str, str] | None:
+    """Map a DB hostname to a Kubernetes Service name and namespace."""
     if not host:
         return None
     if "." not in host:
@@ -554,6 +577,7 @@ def _resolve_postgres_service(host: str, install_namespace: str) -> tuple[str, s
 
 
 def _service_has_ready_endpoints(service: str, namespace: str) -> bool:
+    """Return True when the Service has at least one ready endpoint address."""
     result = oc(
         "get", "endpoints", service, "-n", namespace,
         "-o", "jsonpath={.subsets[0].addresses[0].ip}",
@@ -563,6 +587,7 @@ def _service_has_ready_endpoints(service: str, namespace: str) -> bool:
 
 
 def _postgres_target(config: RefreshConfig) -> tuple[str, str]:
+    """Resolve the PostgreSQL Service and namespace for snapshot refresh."""
     if _bundled_postgres_enabled(config.values_file):
         return "postgres", config.namespace
     result = oc(
@@ -601,6 +626,7 @@ def upgrade_fulfillment_db(config: RefreshConfig) -> None:
 
 
 def maybe_upgrade_fulfillment_db(config: RefreshConfig) -> None:
+    """Deploy the test postgres chart when no ready DB endpoints are present."""
     service, target_namespace = _postgres_target(config)
     if _service_has_ready_endpoints(service, target_namespace):
         print("  PostgreSQL already available, skipping fulfillment-db upgrade")
@@ -609,12 +635,14 @@ def maybe_upgrade_fulfillment_db(config: RefreshConfig) -> None:
 
 
 def adopt_resources_for_helm(config: RefreshConfig) -> None:
+    """Annotate existing namespace resources so Helm can manage them."""
     print("  Adopting existing resources for Helm...")
     result = oc("get", "all,configmap,secret,route", "-n", config.namespace,
                 "-o", "name", capture=True, check=False)
     resources = [r for r in result.stdout.strip().splitlines() if r]
 
     def _adopt(resource: str) -> None:
+        """Add Helm release metadata annotations to a single resource."""
         r = oc("annotate", resource, "-n", config.namespace,
                "meta.helm.sh/release-name=osac",
                f"meta.helm.sh/release-namespace={config.namespace}",
@@ -628,6 +656,7 @@ def adopt_resources_for_helm(config: RefreshConfig) -> None:
 
 
 def upgrade_osac(config: RefreshConfig) -> None:
+    """Upgrade the osac Helm release and adopt pre-existing namespace resources."""
     print("  Upgrading osac chart...")
     (REPO_ROOT / "charts/osac/Chart.lock").unlink(missing_ok=True)
     run(["helm", "dependency", "build", "charts/osac/"])
@@ -660,6 +689,7 @@ def upgrade_osac(config: RefreshConfig) -> None:
 
 
 def wait_fulfillment(config: RefreshConfig) -> None:
+    """Wait for fulfillment-service and osac-operator Deployments to become healthy."""
     print("  Waiting for fulfillment deployments...")
     deploys = oc_json("get", "deploy", "-n", config.namespace,
                       "-l", "app=fulfillment-service")
@@ -686,6 +716,7 @@ def scale_aap_operator(config: RefreshConfig) -> None:
 
 
 def _aap_controller_reconciled(config: RefreshConfig) -> bool:
+    """Return True when the AAP controller has reconciled since the stale timestamp."""
     result = oc(
         "get", "automationcontroller", "osac-aap-controller",
         "-n", config.namespace,
@@ -731,6 +762,7 @@ def wait_aap_ready(config: RefreshConfig) -> None:
 
 
 def fix_assisted_service() -> None:
+    """Reset assisted-service credentials after snapshot identity drift."""
     if oc_exists("secret/assisted-servicelocal-auth", "multicluster-engine"):
         print("  Deleting stale assisted-service auth keypair...")
         oc("delete", "secret", "assisted-servicelocal-auth", "-n", "multicluster-engine")
@@ -743,6 +775,7 @@ def fix_assisted_service() -> None:
 
 
 def post_flight(config: RefreshConfig) -> None:
+    """Run post-deploy prepare scripts and wait for fulfillment rollouts."""
     oc("config", "set-context", "--current", f"--namespace={config.namespace}")
 
     os.environ["INSTALLER_NAMESPACE"] = config.namespace
@@ -779,6 +812,7 @@ def post_flight(config: RefreshConfig) -> None:
 
 
 def main() -> None:
+    """Run the post-snapshot refresh workflow (prepare, deploy, post-flight)."""
     values_file = os.environ.get("VALUES_FILE")
     if not values_file:
         print("ERROR: VALUES_FILE must be set (e.g. values/vmaas-ci/values.yaml)", file=sys.stderr)

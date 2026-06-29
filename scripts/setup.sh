@@ -294,6 +294,8 @@ if [[ "${DEPLOY_MODE}" == "helm" ]]; then
     # In-cluster PostgreSQL must exist before Helm install (operator-managed per
     # INSTALL.md). Creates fulfillment-db and postgres-client-cert-service secrets
     # separately, or enable bundledPostgres in values for secret auto-generation.
+    # CI full-install (bundledPostgres) may deploy the integration-test chart first.
+    maybe_deploy_ci_postgres "${INSTALLER_NAMESPACE}" "${VALUES_FILE}"
     check_postgres_prerequisites "${INSTALLER_NAMESPACE}" "${VALUES_FILE}"
 
     # Create AAP license secret (required by the bootstrap job).

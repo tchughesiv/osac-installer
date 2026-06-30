@@ -300,9 +300,13 @@ oc wait deployment/automation-controller-operator-controller-manager -n ${AAP_NS
 
 ### 1.9 PostgreSQL (Fulfillment Database)
 
-The fulfillment-service requires an in-cluster PostgreSQL database deployed via
-an operator (CloudNativePG, Crunchy PGO, or Zalando). Off-cluster databases
-(RDS, external hosts) are not supported by `setup.sh` prerequisite checks.
+The fulfillment-service connects to PostgreSQL via the URL in the
+`fulfillment-db` secret — any hostname routable from the pod network can work.
+This guide documents the **osac-installer supported path**: in-cluster
+PostgreSQL deployed via an operator (CloudNativePG, Crunchy PGO, or Zalando).
+`setup.sh` validates that the hostname in `fulfillment-db` resolves to a
+Kubernetes Service with ready endpoints; off-cluster databases (RDS, external
+hosts) are not validated by the installer prerequisite check.
 
 Deploy PostgreSQL **before Phase 2** using one of the operator paths documented
 in [`base/osac-fulfillment-service/docs/INSTALL.md`](../base/osac-fulfillment-service/docs/INSTALL.md).
@@ -371,9 +375,10 @@ oc get configmap ca-bundle -n ${NAMESPACE}
 
 ### 2.2 PostgreSQL Database
 
-The fulfillment-service requires a PostgreSQL database running **in the
-cluster**. Connection details are provided via a `fulfillment-db` secret and a
-`postgres-client-cert-service` secret for mutual TLS client authentication.
+For **osac-installer** deployments, use an in-cluster operator-managed
+PostgreSQL cluster (see Phase 1.9). Connection details are provided via a
+`fulfillment-db` secret and a `postgres-client-cert-service` secret for mutual
+TLS client authentication.
 
 > **Shortcut:** If `bundledPostgres.enabled: true` is set in your values file,
 > the chart auto-creates the `fulfillment-db` secret and
@@ -381,7 +386,7 @@ cluster**. Connection details are provided via a `fulfillment-db` secret and a
 > PostgreSQL Service named `postgres` on port 5432 in the install namespace
 > before Helm install — see [Phase 1.9](#19-postgresql-fulfillment-database).
 
-**Deploy PostgreSQL via an in-cluster operator** (production path):
+**Deploy PostgreSQL via an in-cluster operator** (installer-supported path):
 
 1. Follow [`base/osac-fulfillment-service/docs/INSTALL.md`](../base/osac-fulfillment-service/docs/INSTALL.md)
    to install CloudNativePG, Crunchy PGO, or Zalando and create a PostgreSQL
@@ -436,10 +441,10 @@ oc wait certificate/postgres-client-service -n ${NAMESPACE} \
 > the `postgres-client-cert-service` secret into the projected volume at
 > `/etc/fulfillment-grpc-server/db/`. This provides the `sslcert`, `sslkey`,
 > and `sslrootcert` files referenced in the connection URL above.
-> **Supported deployments:** Only in-cluster operator-managed PostgreSQL per
-> INSTALL.md is supported for production. `setup.sh` validates that the resolved
-> Kubernetes Service has ready endpoints; unrecognized or off-cluster hostnames
-> fail with a pointer to INSTALL.md.
+> **Supported deployments:** The installer-supported production path is
+> in-cluster operator-managed PostgreSQL per INSTALL.md. `setup.sh` validates
+> that the resolved Kubernetes Service has ready endpoints; unrecognized or
+> off-cluster hostnames fail with a pointer to INSTALL.md.
 
 ### 2.3 Fulfillment Controller Credentials
 
@@ -913,10 +918,10 @@ VALUES_FILE=values/caas-ci/values.yaml \
 The script handles prerequisite installation, secret creation, Helm deploy,
 and all post-install steps. Set `DEPLOY_MODE=helm` (default) to use Helm.
 
-PostgreSQL must be deployed in-cluster via an operator **before** running
-`setup.sh` (see [Phase 1.9](#19-postgresql-fulfillment-database)). The script
-validates that the database Service has ready endpoints; it does not deploy
-PostgreSQL.
+For **osac-installer**, deploy in-cluster PostgreSQL via an operator **before**
+running `setup.sh` (see [Phase 1.9](#19-postgresql-fulfillment-database)). The
+script validates that the database Service has ready endpoints; it does not
+deploy PostgreSQL.
 
 **Shared cluster deployments:** If multiple developers share the same cluster
 and you need to impersonate a different user, set `OC_IMPERSONATE`:

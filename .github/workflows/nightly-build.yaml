@@ -96,16 +96,6 @@ jobs:
     - name: Sync image tags
       run: ./scripts/sync-image-tags.sh --fix
 
-    - name: Generate nightly version
-      id: version
-      run: |
-        BASE_VERSION=$(yq '.version' charts/osac/Chart.yaml)
-        DATE=$(date -u +%Y%m%d)
-        SHORT_SHA=$(git rev-parse --short=7 HEAD)
-        VERSION="${BASE_VERSION}-nightly.${DATE}.${SHORT_SHA}.${GITHUB_RUN_NUMBER}"
-        echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-        echo "Nightly version: ${VERSION} (base: ${BASE_VERSION})"
-
     - name: Push temporary branch
       id: push
       run: |
@@ -126,6 +116,18 @@ jobs:
         echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
         echo "sha=${COMMIT_SHA}" >> "$GITHUB_OUTPUT"
         echo "Pushed temp branch: ${BRANCH} (${COMMIT_SHA})"
+
+    - name: Generate nightly version
+      id: version
+      env:
+        COMMIT_SHA: ${{ steps.push.outputs.sha }}
+      run: |
+        BASE_VERSION=$(yq '.version' charts/osac/Chart.yaml)
+        DATE=$(date -u +%Y%m%d)
+        SHORT_SHA="${COMMIT_SHA:0:7}"
+        VERSION="${BASE_VERSION}-nightly.${DATE}.${SHORT_SHA}.${GITHUB_RUN_NUMBER}"
+        echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+        echo "Nightly version: ${VERSION} (base: ${BASE_VERSION})"
 
   # -------------------------------------------------------------------
   # Job 2: Run E2E tests against the temporary branch
@@ -390,9 +392,10 @@ jobs:
       TEMP_BRANCH: ${{ needs.prepare.outputs.temp-branch }}
 
     steps:
-    - name: Checkout repository
+    - name: Checkout temporary branch
       uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
       with:
+        ref: ${{ needs.prepare.outputs.temp-branch }}
         fetch-depth: 0
         token: ${{ secrets.GITHUB_TOKEN }}
 

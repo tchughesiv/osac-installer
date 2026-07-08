@@ -514,7 +514,7 @@
               "description": "Server inventory for bare metal agent import. Each entry provisions a BareMetalHost CR.",
               "items": {
                 "type": "object",
-                "required": ["name", "bmc_url", "bmc_secret", "boot_mac", "netris_server_name", "resource_class"],
+                "required": ["name", "bmc_url", "bmc_username", "bmc_password", "boot_mac", "netris_server_name", "resource_class"],
                 "properties": {
                   "name": {
                     "type": "string",
@@ -524,9 +524,13 @@
                     "type": "string",
                     "description": "Redfish BMC address for virtual media boot"
                   },
-                  "bmc_secret": {
+                  "bmc_username": {
                     "type": "string",
-                    "description": "Name of the Kubernetes Secret with BMC credentials"
+                    "description": "BMC username. The playbook creates a Kubernetes Secret named {name}-bmc-secret with these credentials."
+                  },
+                  "bmc_password": {
+                    "type": "string",
+                    "description": "BMC password. The playbook creates a Kubernetes Secret named {name}-bmc-secret with these credentials."
                   },
                   "boot_mac": {
                     "type": "string",

@@ -217,7 +217,7 @@ aap:
       enabled: true
       # Name of the AAP instance CR. Used to derive route/service names.
       name: "osac-aap"
-      # AAP components to enable. Only controller and EDA are needed for OSAC.
+      # AAP components to enable. Only controller is needed for OSAC.
       controller:
         disabled: false
       eda:
@@ -249,8 +249,6 @@ aap:
     # from the AAP instance CR status.
     gateway:
       hostname: ""
-    eda:
-      hostname: ""
     controller:
       hostname: ""
 
@@ -271,6 +269,7 @@ aap:
 
   # Server inventory for bare metal agent import.
   # Each entry provisions a BareMetalHost CR via the import-agents playbook.
+  # The playbook auto-creates a BMC Secret named {name}-bmc-secret for each server.
   # See osac-aap/docs/import-agents.md for the server inventory format.
   importAgents:
     servers: []
@@ -278,13 +277,15 @@ aap:
     # servers:
     #   - name: node001
     #     bmc_url: "redfish-virtualmedia+https://192.168.1.21:8000/redfish/v1/Systems/<uuid>"
-    #     bmc_secret: "node001-bmc-secret"
+    #     bmc_username: "<BMC_USERNAME>"
+    #     bmc_password: "<BMC_PASSWORD>"
     #     boot_mac: "AA:BB:CC:DD:EE:01"
     #     netris_server_name: "server-01"
     #     resource_class: "fc430"
     #   - name: node002
     #     bmc_url: "redfish-virtualmedia+https://192.168.1.22:8000/redfish/v1/Systems/<uuid>"
-    #     bmc_secret: "node002-bmc-secret"
+    #     bmc_username: "<BMC_USERNAME>"
+    #     bmc_password: "<BMC_PASSWORD>"
     #     boot_mac: "AA:BB:CC:DD:EE:02"
     #     netris_server_name: "server-02"
     #     resource_class: "fc430"

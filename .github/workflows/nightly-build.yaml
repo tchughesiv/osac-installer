@@ -104,13 +104,14 @@ jobs:
         set -euo pipefail
         DATE=$(date -u +%Y%m%d)
         SHORT_SHA=$(git rev-parse --short=7 HEAD)
-        # Include the run ID so re-running the workflow against the same
-        # main commit on the same day (e.g. manual workflow_dispatch retries)
-        # never collides with an existing branch — a plain date+sha name
-        # is only unique if main has advanced since the last run, which
-        # isn't true for same-day manual re-runs and causes a
-        # non-fast-forward push rejection.
-        BRANCH="nightly/${DATE}-${SHORT_SHA}-${GITHUB_RUN_ID}"
+        # Include the run ID (unique per workflow run) and run attempt
+        # (increments on "Re-run failed jobs", where the run ID itself
+        # stays the same) so no combination of same-day manual re-run,
+        # whether a fresh dispatch or an in-place re-run, can ever collide
+        # with an existing branch — a plain date+sha name is only unique
+        # if main has advanced since the last run, which isn't true for
+        # either case and causes a non-fast-forward push rejection.
+        BRANCH="nightly/${DATE}-${SHORT_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 
         git config user.name "github-actions[bot]"
         git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -140,10 +141,18 @@ jobs:
         # version reflects where this build actually sits relative to
         # real releases. Fail loudly rather than silently guessing a
         # version if no real tag is reachable. --match restricts to plain
-        # "vX.Y.Z" tags in case an unrelated tag namespace (e.g. "api/vX.Y.Z"
-        # in a component repo) is ever introduced here too.
+        # "vX.Y.Z"-shaped tags in case an unrelated tag namespace (e.g.
+        # "api/vX.Y.Z" in a component repo) is ever introduced here too.
+        # --match is still a glob, not a real anchor (its trailing '*' is
+        # needed to allow multi-digit version segments, but that same '*'
+        # would also accept a stray "-rc1"/".4" suffix) so re-validate the
+        # result with a real regex before trusting it.
         if ! BASE_TAG=$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' --exclude '*-nightly*' 2>/dev/null); then
           echo "ERROR: no real (non-nightly) release tag reachable from HEAD — refusing to guess a version" >&2
+          exit 1
+        fi
+        if [[ ! "${BASE_TAG}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "ERROR: nearest release tag '${BASE_TAG}' is not a plain vX.Y.Z tag — refusing to guess a version" >&2
           exit 1
         fi
         BASE_VERSION="${BASE_TAG#v}"

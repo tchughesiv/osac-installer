@@ -55,7 +55,7 @@ service:
   internalHostname: ""  # Set to fulfillment-internal-api-<namespace>.apps.<cluster>.<domain>
   variant: openshift
   images:
-    service: ghcr.io/osac-project/fulfillment-service:sha-2e1949e
+    service: ghcr.io/osac-project/fulfillment-service:sha-2dca058
     envoy: ghcr.io/osac-project/envoy:v1.33.0
   certs:
     issuerRef:
@@ -112,7 +112,7 @@ service:
 ui:
   enabled: true
   images:
-    ui: ghcr.io/osac-project/osac-ui:sha-1d27c8c
+    ui: ghcr.io/osac-project/osac-ui:sha-9cdfb35
   api:
     fulfillment:
       certs:
@@ -131,15 +131,15 @@ aap:
       name: "osac-aap"
   bootstrap:
     enabled: true
-    image: ghcr.io/osac-project/osac-aap:sha-ee288ea
+    image: ghcr.io/osac-project/osac-aap:sha-b5e5798
     cliImage: quay.io/openshift/origin-cli:4.20.0
     backoffLimit: 15
   configAsCode:
     manifestSecret: "config-as-code-manifest-ig"
     secret: "config-as-code-ig"
-    eeImage: "ghcr.io/osac-project/osac-aap:sha-ee288ea"
+    eeImage: "ghcr.io/osac-project/osac-aap:sha-b5e5798"
     projectGitUri: "https://github.com/osac-project/osac-aap"
-    projectGitBranch: "ee288eac05f78cdffe247d43c538faffdaad26d9"
+    projectGitBranch: "b5e5798ea4fe3eb13963a60c96e1cbf95bc1e5ef"
 
 # --- Validation ---
 validation:

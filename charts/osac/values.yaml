@@ -230,6 +230,8 @@ bmf:
     osClouds: "osac-os-clouds"
   configMaps:
     profiles: "osac-profiles"
+  env:
+    aapInsecureSkipVerify: "true"
 
 # --- Validation hooks ---
 validation:

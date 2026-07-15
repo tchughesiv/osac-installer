@@ -1130,6 +1130,17 @@
               "default": "osac-profiles"
             }
           }
+        },
+        "env": {
+          "type": "object",
+          "description": "Environment variable overrides for the BMF operator pod",
+          "properties": {
+            "aapInsecureSkipVerify": {
+              "type": "string",
+              "description": "Skip TLS certificate verification for AAP API calls (set to 'true' for self-signed certs)",
+              "default": ""
+            }
+          }
         }
       }
     },

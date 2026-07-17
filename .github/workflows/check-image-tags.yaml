@@ -16,7 +16,7 @@ jobs:
   check-image-tags:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.0
         with:
           submodules: recursive
       - name: Verify image tags match submodule commits

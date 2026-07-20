@@ -17,6 +17,11 @@ cnv:
   enabled: false
 mce:
   enabled: true
+  osImages:
+    - openshiftVersion: "4.22"
+      version: "9.8.20260428-0"
+      url: "https://mirror.openshift.com/pub/openshift-v4/x86_64/dependencies/rhcos/4.22/4.22.0/rhcos-4.22.0-x86_64-live-iso.x86_64.iso"
+      cpuArchitecture: "x86_64"
 
 # OSAC CaaS (Cluster-as-a-Service) CI Environment Values
 # CaaS CI values
